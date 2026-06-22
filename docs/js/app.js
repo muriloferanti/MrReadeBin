@@ -51,7 +51,9 @@ import {
   saveActiveTab,
   restoreActiveTab,
   initKeyboardShortcuts,
+  on,
 } from './ui.js';
+import { assetUrl } from './config.js';
 import {
   loadMappackFile,
   resolveMappackAddresses,
@@ -133,7 +135,7 @@ function clearFiles() {
 
   $('#summaryPanel').hidden = true;
   $('#btnExport').disabled = true;
-  $('#regionsBody').innerHTML = '<tr><td colspan="7" class="muted center">Nenhuma região</td></tr>';
+  $('#regionsBody').innerHTML = '<tr><td colspan="8" class="muted center">Nenhuma região</td></tr>';
   $('#hexContentA').innerHTML = '';
   $('#hexContentB').innerHTML = '';
   $('#wordDiffDetail').hidden = true;
@@ -478,7 +480,7 @@ function initMappack() {
 
   $('#btnLoadExampleMappack')?.addEventListener('click', async () => {
     try {
-      const res = await fetch('mappacks/example-med17.json');
+      const res = await fetch(assetUrl('mappacks/example-med17.json'));
       if (!res.ok) throw new Error('Não foi possível carregar o exemplo');
       const mp = await loadMappackFile(new File([await res.blob()], 'example-med17.json'));
       await assignMappack(mp, 'Exemplo MED17');
@@ -494,10 +496,6 @@ function initMappack() {
   } else {
     renderMappackUI();
   }
-}
-
-  const v = value.trim().replace(/^0x/i, '');
-  return Math.max(0, parseInt(v, 16) || parseInt(v, 10) || 0);
 }
 
 function parseHexInput(value) {
@@ -1069,35 +1067,39 @@ function initAiSettings() {
   const dlg = $('#settingsDialog');
   const open = () => openSettingsDialog();
 
-  $('#btnSettings')?.addEventListener('click', open);
-  $('#btnSettingsInline')?.addEventListener('click', open);
-  $('#btnCloseSettings')?.addEventListener('click', () => dlg.close());
+  on('#btnSettings', 'click', open);
+  on('#btnSettingsInline', 'click', open);
+  on('#btnCloseSettings', 'click', () => dlg?.close());
 
-  $('#aiProvider').addEventListener('change', updateAiModelField);
+  on('#aiProvider', 'change', updateAiModelField);
 
-  $('#settingsForm').addEventListener('submit', (e) => {
+  on('#settingsForm', 'submit', (e) => {
     e.preventDefault();
     saveSettingsFromForm();
-    dlg.close();
+    dlg?.close();
   });
 
-  $('#btnClearAiKey').addEventListener('click', () => {
+  on('#btnClearAiKey', 'click', () => {
     clearAiSettings();
     state.aiSettings = loadAiSettings();
-    $('#aiApiKey').value = '';
-    $('#aiSettingsStatus').textContent = 'Chave removida.';
+    const keyEl = $('#aiApiKey');
+    if (keyEl) keyEl.value = '';
+    const status = $('#aiSettingsStatus');
+    if (status) status.textContent = 'Chave removida.';
     updateAiButtons();
   });
 
-  $('#btnAiAnalyze').addEventListener('click', () => runAiAnalysis(false));
-  $('#btnAiRegion').addEventListener('click', () => runAiAnalysis(true));
+  on('#btnAiAnalyze', 'click', () => runAiAnalysis(false));
+  on('#btnAiRegion', 'click', () => runAiAnalysis(true));
 
   updateAiButtons();
 }
 
 function initDropzone(zone) {
+  if (!zone) return;
   const slot = zone.dataset.slot;
   const input = $(`#file${slot}`);
+  if (!input) return;
 
   zone.addEventListener('click', () => input.click());
   input.addEventListener('change', () => loadFile(input.files?.[0], slot));
@@ -1125,43 +1127,45 @@ function initEvents() {
   initDropzone($('#dropA'));
   initDropzone($('#dropB'));
 
-  $('#btnSwap').addEventListener('click', swapFiles);
-  $('#btnClear').addEventListener('click', clearFiles);
-  $('#btnExport').addEventListener('click', exportJson);
+  on('#btnSwap', 'click', swapFiles);
+  on('#btnClear', 'click', clearFiles);
+  on('#btnExport', 'click', exportJson);
 
-  $('#decodeMode').addEventListener('change', () => {
-    $('#xorField').hidden = getDecodeMode() !== 'xor';
+  on('#decodeMode', 'change', () => {
+    const xor = $('#xorField');
+    if (xor) xor.hidden = getDecodeMode() !== 'xor';
     updateDecode();
   });
-  $('#xorKey').addEventListener('input', updateDecode);
-  $('#hexCols').addEventListener('change', () => {
+  on('#xorKey', 'input', updateDecode);
+  on('#hexCols', 'change', () => {
     refreshDiffRows();
     renderHex();
   });
-  $('#hexHideEqual').addEventListener('change', renderHex);
-  $('#hexSyncScroll').addEventListener('change', renderHex);
-  $('#hexAlignB').addEventListener('change', () => {
+  on('#hexHideEqual', 'change', renderHex);
+  on('#hexSyncScroll', 'change', renderHex);
+  on('#hexAlignB', 'change', () => {
     refreshDiffRows();
     renderHex();
   });
 
-  $('#hexScrollA').addEventListener('scroll', () => onHexScroll('a'));
-  $('#hexScrollB').addEventListener('scroll', () => onHexScroll('b'));
+  on('#hexScrollA', 'scroll', () => onHexScroll('a'));
+  on('#hexScrollB', 'scroll', () => onHexScroll('b'));
 
   const bindDiffNav = (dir) => () => jumpToDiff(dir);
-  $('#hexDiffPrev').addEventListener('click', bindDiffNav(-1));
-  $('#hexDiffNext').addEventListener('click', bindDiffNav(1));
-  $('#hexDiffPrevBar').addEventListener('click', bindDiffNav(-1));
-  $('#hexDiffNextBar').addEventListener('click', bindDiffNav(1));
+  on('#hexDiffPrev', 'click', bindDiffNav(-1));
+  on('#hexDiffNext', 'click', bindDiffNav(1));
+  on('#hexDiffPrevBar', 'click', bindDiffNav(-1));
+  on('#hexDiffNextBar', 'click', bindDiffNav(1));
 
-  $('#hexOffset').addEventListener('change', () => {
-    scrollHexToOffset(parseHexInput($('#hexOffset').value));
+  on('#hexOffset', 'change', () => {
+    const el = $('#hexOffset');
+    if (el) scrollHexToOffset(parseHexInput(el.value));
   });
 
-  $('#regionFilter').addEventListener('input', renderRegionsTable);
-  $('#onlyCalibration').addEventListener('change', renderRegionsTable);
+  on('#regionFilter', 'input', renderRegionsTable);
+  on('#onlyCalibration', 'change', renderRegionsTable);
 
-  $('#heatmap').addEventListener('click', (e) => {
+  on('#heatmap', 'click', (e) => {
     const canvas = e.target;
     const rect = canvas.getBoundingClientRect();
     const cols = 128;
@@ -1171,7 +1175,8 @@ function initEvents() {
     const col = Math.floor((e.clientX - rect.left) / cellW);
     const row = Math.floor((e.clientY - rect.top) / cellH);
     state.hexOffset = (row * cols + col) * 4096;
-    $('#hexOffset').value = '0x' + state.hexOffset.toString(16).toUpperCase();
+    const offsetEl = $('#hexOffset');
+    if (offsetEl) offsetEl.value = '0x' + state.hexOffset.toString(16).toUpperCase();
     activateTab('hex');
     scrollHexToOffset(state.hexOffset);
   });

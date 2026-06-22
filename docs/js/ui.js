@@ -1,5 +1,16 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 
+/** Liga evento só se o elemento existir (evita crash com HTML desatualizado). */
+export function on(sel, event, handler, options) {
+  const el = typeof sel === 'string' ? $(sel) : sel;
+  if (!el) {
+    console.warn(`[MrReadeBin] Elemento não encontrado: ${typeof sel === 'string' ? sel : '(node)'}`);
+    return null;
+  }
+  el.addEventListener(event, handler, options);
+  return el;
+}
+
 export function showToast(message, type = 'info', duration = 3200) {
   const host = $('#toastHost');
   if (!host) return;
