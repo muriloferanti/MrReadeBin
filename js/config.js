@@ -1,4 +1,4 @@
-/** Base path para GitHub Pages (ex.: /MrReadeBin). Vazio na raiz ou file:// */
+/** Base path para GitHub Pages (ex.: /ecu-map-diff). Vazio na raiz ou file:// */
 export function getBasePath() {
   const script = document.querySelector('script[data-base]');
   if (script?.dataset.base !== undefined) return script.dataset.base;

@@ -53,11 +53,17 @@ export function entropy(data) {
 
 export function classifyChunk(data) {
   if (!data.length) return 'empty';
-  const zeroRatio = data.filter((b) => b === 0).length / data.length;
+  let zeros = 0;
+  let printable = 0;
+  for (let i = 0; i < data.length; i++) {
+    const b = data[i];
+    if (b === 0) zeros++;
+    if (b >= 0x20 && b <= 0x7e) printable++;
+  }
+  const zeroRatio = zeros / data.length;
   if (zeroRatio > 0.92) return 'empty';
 
-  const printable = data.filter((b) => b >= 0x20 && b <= 0x7e).length / data.length;
-  if (printable > 0.75) return 'text';
+  if (printable / data.length > 0.75) return 'text';
 
   const e = entropy(data);
   if (e > 6.8) return 'entropy';
@@ -80,8 +86,18 @@ export function analyzeSections(buffer, blockSize = 4096) {
   return sections;
 }
 
-export function parseMetadata(buffer, fileName = '') {
-  const text = new TextDecoder('latin1').decode(buffer);
+function decodeMetadataText(buffer) {
+  if (buffer.length <= 1024 * 1024) {
+    return new TextDecoder('latin1').decode(buffer);
+  }
+  const head = new TextDecoder('latin1').decode(buffer.subarray(0, 1024 * 1024));
+  const tail = new TextDecoder('latin1').decode(buffer.subarray(Math.max(0, buffer.length - 512 * 1024)));
+  return `${head}\n${tail}`;
+}
+
+export function parseMetadata(buffer, fileName = '', options = {}) {
+  const skipHeavy = options.skipHeavy ?? buffer.length > 512 * 1024;
+  const text = decodeMetadataText(buffer);
   const pick = (re) => {
     const m = text.match(re);
     return m ? [...new Set(m)][0] : null;
@@ -91,10 +107,13 @@ export function parseMetadata(buffer, fileName = '') {
     return m ? [...new Set(m)] : [];
   };
 
-  const strings = extractStrings(buffer);
-  const notable = strings
-    .filter((s) => /MED|EDC|TPROT|04C90|10SW|1037|Engine|TFS|CYTA|EV_ECM/i.test(s.text))
-    .map((s) => s.text);
+  let notable = [];
+  if (!skipHeavy) {
+    const strings = extractStrings(buffer, 8);
+    notable = strings
+      .filter((s) => /MED|EDC|TPROT|04C90|10SW|1037|Engine|TFS|CYTA|EV_ECM/i.test(s.text))
+      .map((s) => s.text);
+  }
 
   return {
     fileName,
@@ -109,8 +128,16 @@ export function parseMetadata(buffer, fileName = '') {
     engine: pick(PATTERNS.engine),
     ecuId: pick(PATTERNS.ecuId),
     notableStrings: notable,
-    sections: analyzeSections(buffer),
+    sections: skipHeavy ? [] : analyzeSections(buffer),
+    _enriched: !skipHeavy,
   };
+}
+
+export function enrichMetadata(meta, buffer) {
+  if (meta._enriched) return meta;
+  if (!meta.sections.length) meta.sections = analyzeSections(buffer);
+  meta._enriched = true;
+  return meta;
 }
 
 export function renderMetadata(meta) {

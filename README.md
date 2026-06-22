@@ -1,4 +1,4 @@
-# MrReadeBin
+# ECU Map Diff
 
 Comparador de bins ECU Bosch MED17/EDC17 no navegador — hex diff, regiões, mappack e sugestões por IA.
 
@@ -10,6 +10,6 @@ Abra `index.html` no navegador ou sirva a pasta com qualquer servidor estático.
 
 1. No repositório: **Settings → Pages → Build and deployment → Source: GitHub Actions**
 2. Cada push na `main` dispara o workflow `.github/workflows/pages.yml`
-3. URL: `https://muriloferanti.github.io/MrReadeBin/`
+3. URL: `https://muriloferanti.github.io/ecu-map-diff/`
 
 A pasta `docs/` é legado; o deploy oficial é pela raiz do repositório via Actions.

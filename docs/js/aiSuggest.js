@@ -1,5 +1,6 @@
 import { getProviderConfig } from './aiSettings.js';
 import { findMapsForRegion } from './mappack.js';
+import { getDiffCount } from './diffEngine.js';
 
 const SYSTEM_PROMPT = `Você é um especialista em calibração de ECUs Bosch MED17/EDC17.
 Analise diferenças entre dois arquivos binários (original vs modificado) com base nos metadados, regiões e — quando fornecido — definições de mappack (nomes de mapas conhecidos: boost, torque, ignição, injeção, etc.).
@@ -35,7 +36,7 @@ export function buildAnalysisPayload(metaA, metaB, regions, diffResult, options 
 
   const picked = sorted.slice(0, maxRegions);
   const sim =
-    (1 - diffResult.diffs.length / Math.min(diffResult.lenA, diffResult.lenB)) * 100;
+    (1 - getDiffCount(diffResult) / Math.min(diffResult.lenA, diffResult.lenB)) * 100;
 
   return {
     context: 'Comparação de bins ECU Bosch — apenas metadados e regiões alteradas (sem dump completo)',
@@ -56,7 +57,7 @@ export function buildAnalysisPayload(metaA, metaB, regions, diffResult, options 
       engine: metaB.engine,
     },
     summary: {
-      totalDiffBytes: diffResult.diffs.length,
+      totalDiffBytes: getDiffCount(diffResult),
       totalRegions: regions.length,
       regionsInPrompt: picked.length,
       similarityPct: sim.toFixed(2),
@@ -78,7 +79,7 @@ export function buildAnalysisPayload(metaA, metaB, regions, diffResult, options 
       end: `0x${r.end.toString(16).toUpperCase()}`,
       lengthBytes: r.length,
       sectionType: r.type,
-      bytesChanged: r.items.length,
+      bytesChanged: r.length,
       avgWordDeltaU16: Number(r.avgDelta.toFixed(1)),
       uniformDelta: r.uniformDelta,
       knownMaps,

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MrReadeBin — ECU Map Diff Viewer</title>
+  <title>ECU Map Diff — Bosch MED17 / EDC17</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -14,7 +14,7 @@
     <div class="header__left">
       <button type="button" id="btnSidebar" class="btn btn--icon header__menu" aria-label="Abrir painel" aria-expanded="false">☰</button>
       <div class="header__brand">
-        <h1>MrReadeBin</h1>
+        <h1>ECU Map Diff</h1>
         <p class="subtitle">Comparação de bins Bosch MED17 / EDC17</p>
       </div>
     </div>
@@ -339,6 +339,13 @@
   </div>
 
   <div id="toastHost" class="toast-host" aria-live="polite"></div>
+
+  <div id="compareLoading" class="compare-loading" hidden>
+    <div class="compare-loading__box">
+      <span class="compare-loading__spinner" aria-hidden="true"></span>
+      <span id="compareLoadingText">Comparando arquivos…</span>
+    </div>
+  </div>
 
   <dialog id="settingsDialog" class="settings-dialog">
     <form id="settingsForm" method="dialog">

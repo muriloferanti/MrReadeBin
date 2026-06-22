@@ -1,9 +1,10 @@
 /**
  * Mappack — definições de mapas (auxiliar ao .bin, estilo WinOLS .kp / A2L).
- * Formato JSON aberto do MrReadeBin; .kp WinOLS é proprietário (import experimental).
+ * Formato JSON aberto do ECU Map Diff; .kp WinOLS é proprietário (import experimental).
  */
 
-const STORAGE_KEY = 'mrreadebin_mappack';
+const STORAGE_KEY = 'ecumapdiff_mappack';
+const STORAGE_KEY_LEGACY = 'mrreadebin_mappack';
 
 export function parseHexOffset(value) {
   if (value == null) return null;
@@ -183,7 +184,7 @@ export function saveMappackToStorage(mappack) {
 
 export function loadMappackFromStorage() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(STORAGE_KEY_LEGACY);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;

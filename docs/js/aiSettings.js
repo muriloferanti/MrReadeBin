@@ -1,4 +1,5 @@
-const STORAGE_KEY = 'mrreadebin_ai_settings';
+const STORAGE_KEY = 'ecumapdiff_ai_settings';
+const STORAGE_KEY_LEGACY = 'mrreadebin_ai_settings';
 
 export const AI_PROVIDERS = {
   openai: {
@@ -36,7 +37,7 @@ const DEFAULTS = {
 
 export function loadAiSettings() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(STORAGE_KEY_LEGACY);
     if (!raw) return { ...DEFAULTS };
     return { ...DEFAULTS, ...JSON.parse(raw) };
   } catch {

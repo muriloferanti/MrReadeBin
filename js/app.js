@@ -4,17 +4,19 @@ import {
   renderSections,
   extractStrings,
   md5Hex,
+  enrichMetadata,
 } from './ecuParser.js';
 import {
   decodeBuffer,
   formatHexLine,
 } from './decrypt.js';
 import {
-  computeByteDiff,
-  groupRegions,
+  scanByteDiff,
   analyzeRegion,
+  buildDiffRowsFromRegions,
   buildHeatmapBuckets,
   exportReport,
+  getDiffCount,
 } from './diffEngine.js';
 import {
   loadAiSettings,
@@ -52,6 +54,7 @@ import {
   restoreActiveTab,
   initKeyboardShortcuts,
   on,
+  setCompareLoading,
 } from './ui.js';
 import { assetUrl } from './config.js';
 import {
@@ -86,9 +89,15 @@ const state = {
   baseRawB: null,
   hexEditTarget: null,
   mappack: null,
+  comparing: false,
+  stringsReadyA: false,
+  stringsReadyB: false,
 };
 
 const HEX_ROW_HEIGHT = 20;
+const LARGE_FILE = 512 * 1024;
+const REGION_BATCH = 80;
+let hexRenderRaf = 0;
 const $ = (sel) => document.querySelector(sel);
 
 function activateTab(tabId) {
@@ -100,7 +109,10 @@ function activateTab(tabId) {
   const panel = $(`#tab-${tabId}`);
   panel?.classList.add('active');
   saveActiveTab(tabId);
-  if (tabId === 'hex') requestAnimationFrame(renderHex);
+  if (tabId === 'hex') requestAnimationFrame(() => renderHex());
+  else if (tabId === 'strings') ensureStringsRendered();
+  else if (tabId === 'sections') ensureSectionsRendered();
+  else if (tabId === 'heatmap' && state.diffResult) requestAnimationFrame(renderHeatmap);
   setSidebarOpen(false);
 }
 
@@ -122,6 +134,10 @@ function clearFiles() {
   state.regions = [];
   state.diffRows = [];
   state.selectedRegion = null;
+  state.stringsReadyA = false;
+  state.stringsReadyB = false;
+  state.comparing = false;
+  setCompareLoading(false);
 
   ['A', 'B'].forEach((slot) => {
     $(`#info${slot}`).innerHTML = 'Nenhum arquivo';
@@ -190,25 +206,33 @@ async function loadFile(file, slot) {
 
 async function assignBuffer(slot, buffer, name) {
   const meta = parseMetadata(buffer, name);
-  meta.md5 = await md5Hex(buffer);
+  scheduleMetadataEnrichment(slot, buffer, meta);
 
   if (slot === 'A') {
     state.rawA = cloneBuffer(buffer);
     state.baseRawA = cloneBuffer(buffer);
     state.metaA = meta;
+    state.stringsReadyA = buffer.length <= LARGE_FILE;
     setFileInfo($('#infoA'), name, buffer.length);
     $('#metaA').innerHTML = `<h3>Original (A)</h3>${renderMetadata(meta)}`;
-    $('#stringsA').textContent = formatStrings(buffer);
-    $('#sectionsA').innerHTML = renderSections(meta.sections);
+    if (state.stringsReadyA) $('#stringsA').textContent = formatStrings(buffer);
+    else $('#stringsA').textContent = 'Abra a aba Strings para carregar.';
+    $('#sectionsA').innerHTML = meta.sections.length
+      ? renderSections(meta.sections)
+      : '<p class="muted">Análise de seções em segundo plano…</p>';
     $('#dropA').classList.add('dropzone--loaded');
   } else {
     state.rawB = cloneBuffer(buffer);
     state.baseRawB = cloneBuffer(buffer);
     state.metaB = meta;
+    state.stringsReadyB = buffer.length <= LARGE_FILE;
     setFileInfo($('#infoB'), name, buffer.length);
     $('#metaB').innerHTML = `<h3>Modificado (B)</h3>${renderMetadata(meta)}`;
-    $('#stringsB').textContent = formatStrings(buffer);
-    $('#sectionsB').innerHTML = renderSections(meta.sections);
+    if (state.stringsReadyB) $('#stringsB').textContent = formatStrings(buffer);
+    else $('#stringsB').textContent = 'Abra a aba Strings para carregar.';
+    $('#sectionsB').innerHTML = meta.sections.length
+      ? renderSections(meta.sections)
+      : '<p class="muted">Análise de seções em segundo plano…</p>';
     $('#dropB').classList.add('dropzone--loaded');
   }
 
@@ -217,9 +241,49 @@ async function assignBuffer(slot, buffer, name) {
   refreshMappackResolution();
 
   if (state.rawA && state.rawB) {
-    runCompare();
+    await runCompare();
   } else {
     showToast(`Arquivo ${slot} carregado`, 'success');
+  }
+}
+
+function scheduleMetadataEnrichment(slot, buffer, meta) {
+  const run = async () => {
+    enrichMetadata(meta, buffer);
+    const sectionsEl = $(`#sections${slot}`);
+    if (sectionsEl && meta.sections.length) {
+      sectionsEl.innerHTML = renderSections(meta.sections);
+    }
+    meta.md5 = await md5Hex(buffer);
+    const metaEl = slot === 'A' ? $('#metaA') : $('#metaB');
+    const m = slot === 'A' ? state.metaA : state.metaB;
+    if (metaEl && m) {
+      metaEl.innerHTML = `<h3>${slot === 'A' ? 'Original (A)' : 'Modificado (B)'}</h3>${renderMetadata(m)}`;
+    }
+  };
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(() => { run(); }, { timeout: 2500 });
+  else setTimeout(run, 50);
+}
+
+function ensureStringsRendered() {
+  if (state.rawA && !state.stringsReadyA) {
+    $('#stringsA').textContent = formatStrings(state.rawA);
+    state.stringsReadyA = true;
+  }
+  if (state.rawB && !state.stringsReadyB) {
+    $('#stringsB').textContent = formatStrings(state.rawB);
+    state.stringsReadyB = true;
+  }
+}
+
+function ensureSectionsRendered() {
+  if (state.metaA && !state.metaA._enriched && state.rawA) {
+    enrichMetadata(state.metaA, state.rawA);
+    $('#sectionsA').innerHTML = renderSections(state.metaA.sections);
+  }
+  if (state.metaB && !state.metaB._enriched && state.rawB) {
+    enrichMetadata(state.metaB, state.rawB);
+    $('#sectionsB').innerHTML = renderSections(state.metaB.sections);
   }
 }
 
@@ -235,49 +299,79 @@ function updateDecode() {
   const mode = getDecodeMode();
   if (state.rawA) state.decodedA = decodeBuffer(state.rawA, mode, getXorKey());
   if (state.rawB) state.decodedB = decodeBuffer(state.rawB, mode, getXorKey());
-  if (state.diffResult) runCompare();
+  if (state.diffResult && !state.comparing) runCompare(true);
 }
 
-function runCompare(silent = false) {
-  if (!state.decodedA || !state.decodedB) return;
+async function yieldToMain() {
+  await new Promise((r) => setTimeout(r, 0));
+}
 
-  state.diffResult = computeByteDiff(state.decodedA, state.decodedB);
-  const grouped = groupRegions(state.diffResult.diffs);
-  state.regions = grouped.map((r) => analyzeRegion(r, state.decodedA, state.decodedB, state.metaA.sections));
-  refreshDiffRows();
+async function runCompare(silent = false) {
+  if (!state.decodedA || !state.decodedB || state.comparing) return;
 
-  renderSummary();
-  renderRegionsTable();
-  renderHeatmap();
-  renderHex();
-  updateAiButtons();
-  updateTabBadges(state.regions.length, state.diffResult.diffs.length);
-  $('#btnExport').disabled = false;
-  $('#summaryPanel').hidden = false;
-  updateEditStatus();
+  state.comparing = true;
+  if (!silent) setCompareLoading(true, 'Comparando arquivos…');
+  await new Promise((r) => requestAnimationFrame(r));
 
-  const sim = (1 - state.diffResult.diffs.length / Math.min(state.diffResult.lenA, state.diffResult.lenB)) * 100;
-  renderSimilarityBar(sim);
-  updateWorkflowSteps(3);
+  try {
+    const scanned = scanByteDiff(state.decodedA, state.decodedB);
+    state.diffResult = scanned;
 
-  if (!silent) {
-    if (state.diffResult.diffs.length > 0) {
-      activateTab('hex');
-      showToast(`${state.regions.length} regiões · ${state.diffResult.diffs.length.toLocaleString('pt-BR')} bytes diferentes`, 'success');
-    } else {
-      activateTab('metadata');
-      showToast('Arquivos idênticos', 'info');
+    const rawRegions = scanned.regions;
+    state.regions = [];
+    for (let i = 0; i < rawRegions.length; i += REGION_BATCH) {
+      const slice = rawRegions.slice(i, i + REGION_BATCH).map((r) =>
+        analyzeRegion(r, state.decodedA, state.decodedB, state.metaA.sections || [])
+      );
+      state.regions.push(...slice);
+      if (i + REGION_BATCH < rawRegions.length) {
+        if (!silent) {
+          setCompareLoading(true, `Analisando regiões… ${Math.min(i + REGION_BATCH, rawRegions.length)}/${rawRegions.length}`);
+        }
+        await yieldToMain();
+      }
     }
+
+    rebuildDiffRows();
+    renderSummary();
+    renderRegionsTable();
+    updateAiButtons();
+    updateTabBadges(state.regions.length, getDiffCount(state.diffResult));
+    $('#btnExport').disabled = false;
+    $('#summaryPanel').hidden = false;
+    updateEditStatus();
+
+    const total = getDiffCount(state.diffResult);
+    const sim = (1 - total / Math.min(state.diffResult.lenA, state.diffResult.lenB)) * 100;
+    renderSimilarityBar(sim);
+    updateWorkflowSteps(3);
+
+    await yieldToMain();
+    scheduleRenderHex();
+
+    if (!silent) {
+      if (total > 0) {
+        activateTab('hex');
+        showToast(`${state.regions.length} regiões · ${total.toLocaleString('pt-BR')} bytes diferentes`, 'success');
+      } else {
+        activateTab('metadata');
+        showToast('Arquivos idênticos', 'info');
+      }
+    }
+  } finally {
+    state.comparing = false;
+    setCompareLoading(false);
   }
 }
 
 function renderSummary() {
-  const { diffs, sizeMismatch, lenA, lenB } = state.diffResult;
-  const sim = (1 - diffs.length / Math.min(lenA, lenB)) * 100;
+  const { sizeMismatch, lenA, lenB } = state.diffResult;
+  const total = getDiffCount(state.diffResult);
+  const sim = (1 - total / Math.min(lenA, lenB)) * 100;
   const swMatch = state.metaA.swVersion === state.metaB.swVersion;
 
   $('#diffStats').innerHTML = `
-    <dt>Bytes diferentes</dt><dd>${diffs.length.toLocaleString('pt-BR')}</dd>
+    <dt>Bytes diferentes</dt><dd>${total.toLocaleString('pt-BR')}</dd>
     <dt>Regiões</dt><dd>${state.regions.length}</dd>
     <dt>Similaridade</dt><dd>${sim.toFixed(4)}%</dd>
     <dt>Tamanhos</dt><dd>A=${lenA} / B=${lenB}${sizeMismatch ? ' ⚠ diferentes' : ''}</dd>
@@ -317,7 +411,7 @@ function renderRegionsTable() {
         <td class="mono">0x${r.start.toString(16).toUpperCase()}</td>
         <td class="mono">${r.length} B</td>
         <td><span class="tag tag--${tagClass}">${r.type}</span></td>
-        <td>${r.items.length}</td>
+        <td>${r.length}</td>
         <td class="mono">${r.avgDelta.toFixed(1)}${r.uniformDelta ? ' ∆' : ''}</td>
         <td class="map-cell">${mapCell}</td>
         <td class="actions">
@@ -698,18 +792,38 @@ function rowHasDiffA(rowOffset, cols) {
   return false;
 }
 
-function refreshDiffRows() {
+function rebuildDiffRows() {
+  if (!state.decodedA || !state.regions.length) {
+    state.diffRows = [];
+    return;
+  }
+  if (getHexAlignB() === 0) {
+    state.diffRows = buildDiffRowsFromRegions(state.regions, getHexCols());
+    return;
+  }
+  refreshDiffRowsAligned();
+}
+
+function refreshDiffRowsAligned() {
   if (!state.decodedA || !state.decodedB) {
     state.diffRows = [];
     return;
   }
   const cols = getHexCols();
-  const rows = new Set();
+  const rows = [];
   const len = state.decodedA.length;
   for (let off = 0; off < len; off += cols) {
-    if (rowHasDiffA(off, cols)) rows.add(off);
+    if (rowHasDiffA(off, cols)) rows.push(off);
   }
-  state.diffRows = [...rows].sort((a, b) => a - b);
+  state.diffRows = rows;
+}
+
+function scheduleRenderHex() {
+  if (hexRenderRaf) return;
+  hexRenderRaf = requestAnimationFrame(() => {
+    hexRenderRaf = 0;
+    renderHex();
+  });
 }
 
 function getHexRowModel() {
@@ -828,7 +942,6 @@ function renderHexPane(side, scrollEl, contentEl, spacerEl) {
 
 function renderHex() {
   if (!state.decodedA || !state.decodedB) return;
-  refreshDiffRows();
   renderHexPane('a', $('#hexScrollA'), $('#hexContentA'), $('#hexSpacerA'));
   renderHexPane('b', $('#hexScrollB'), $('#hexContentB'), $('#hexSpacerB'));
   updateEditStatus();
@@ -849,7 +962,7 @@ function onHexScroll(sourceSide) {
     else scrollA.scrollTop = scrollB.scrollTop;
     state.hexScrollLock = false;
   }
-  renderHex();
+  scheduleRenderHex();
 }
 
 function scrollHexToOffset(offset) {
@@ -898,9 +1011,10 @@ function jumpToDiff(direction) {
 
 function renderHeatmap() {
   const canvas = $('#heatmap');
+  if (!canvas || !state.diffResult) return;
   const ctx = canvas.getContext('2d');
   const { counts, bucketSize, buckets } = buildHeatmapBuckets(
-    state.diffResult.diffs,
+    state.diffResult.heatmap,
     state.decodedA.length,
     4096
   );
@@ -1138,14 +1252,14 @@ function initEvents() {
   });
   on('#xorKey', 'input', updateDecode);
   on('#hexCols', 'change', () => {
-    refreshDiffRows();
-    renderHex();
+    rebuildDiffRows();
+    scheduleRenderHex();
   });
-  on('#hexHideEqual', 'change', renderHex);
-  on('#hexSyncScroll', 'change', renderHex);
+  on('#hexHideEqual', 'change', scheduleRenderHex);
+  on('#hexSyncScroll', 'change', scheduleRenderHex);
   on('#hexAlignB', 'change', () => {
-    refreshDiffRows();
-    renderHex();
+    rebuildDiffRows();
+    scheduleRenderHex();
   });
 
   on('#hexScrollA', 'scroll', () => onHexScroll('a'));
@@ -1197,5 +1311,5 @@ initKeyboardShortcuts({
   onTab: activateTab,
 });
 window.addEventListener('resize', () => {
-  if ($('#tab-hex')?.classList.contains('active')) renderHex();
+  if ($('#tab-hex')?.classList.contains('active')) scheduleRenderHex();
 });

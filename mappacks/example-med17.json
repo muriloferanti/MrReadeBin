@@ -3,7 +3,7 @@
   "version": "1.0",
   "ecu": "MED17.5",
   "sw": ["10SW0000000000"],
-  "author": "MrReadeBin",
+  "author": "ECU Map Diff",
   "notes": "Offsets de exemplo para demonstrar o formato. Substitua pelos endereços reais do seu projeto WinOLS ou exportação manual.",
   "maps": [
     {

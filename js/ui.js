@@ -4,7 +4,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 export function on(sel, event, handler, options) {
   const el = typeof sel === 'string' ? $(sel) : sel;
   if (!el) {
-    console.warn(`[MrReadeBin] Elemento não encontrado: ${typeof sel === 'string' ? sel : '(node)'}`);
+    console.warn(`[ECU Map Diff] Elemento não encontrado: ${typeof sel === 'string' ? sel : '(node)'}`);
     return null;
   }
   el.addEventListener(event, handler, options);
@@ -99,12 +99,12 @@ export function initCollapsiblePanels() {
 }
 
 export function saveActiveTab(tabId) {
-  try { localStorage.setItem('mrreadebin_tab', tabId); } catch { /* ignore */ }
+  try { localStorage.setItem('ecumapdiff_tab', tabId); } catch { /* ignore */ }
 }
 
 export function restoreActiveTab(activateTab) {
   try {
-    const saved = localStorage.getItem('mrreadebin_tab');
+    const saved = localStorage.getItem('ecumapdiff_tab') || localStorage.getItem('mrreadebin_tab');
     if (saved) activateTab(saved);
   } catch { /* ignore */ }
 }
@@ -118,4 +118,12 @@ export function initKeyboardShortcuts(handlers) {
     if (e.key === '2') handlers.onTab?.('regions');
     if (e.key === '3') handlers.onTab?.('heatmap');
   });
+}
+
+export function setCompareLoading(active, message = 'Comparando arquivos…') {
+  document.body.classList.toggle('compare-busy', active);
+  const el = $('#compareLoadingText');
+  if (el && message) el.textContent = message;
+  const host = $('#compareLoading');
+  if (host) host.hidden = !active;
 }
