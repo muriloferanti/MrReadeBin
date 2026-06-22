@@ -773,9 +773,66 @@ kbd {
 }
 
 .hex-scroll--paged {
-  overflow: hidden;
-  max-height: calc(var(--hex-row-h) * 42);
-  min-height: calc(var(--hex-row-h) * 42);
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+.hex-scroll--paged .hex-content {
+  position: static;
+  min-height: 100%;
+}
+
+.hex-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 12rem;
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.hex-pagination {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.hex-pagination__nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.hex-pagination__page {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.hex-pagination__page input {
+  width: 4.2rem;
+  text-align: center;
+}
+
+.hex-pagination__meta {
+  text-align: center;
+  font-size: 0.75rem;
+  font-family: var(--mono);
+  margin: 0;
 }
 
 .hex-pager__label,

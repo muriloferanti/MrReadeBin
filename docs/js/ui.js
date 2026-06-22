@@ -117,6 +117,8 @@ export function initKeyboardShortcuts(handlers) {
     if (e.key === '1') handlers.onTab?.('hex');
     if (e.key === '2') handlers.onTab?.('regions');
     if (e.key === '3') handlers.onTab?.('heatmap');
+    if (e.key === '[') handlers.onHexPagePrev?.();
+    if (e.key === ']') handlers.onHexPageNext?.();
   });
 }
 

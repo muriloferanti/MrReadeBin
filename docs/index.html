@@ -133,6 +133,7 @@
           <li><kbd>N</kbd> / <kbd>P</kbd> diferenças</li>
           <li>Clique no hex <strong>B</strong> para editar byte</li>
           <li>Duplo-clique no <strong>A</strong> copia para B</li>
+          <li><kbd>[</kbd> / <kbd>]</kbd> páginas hex</li>
         </ul>
       </section>
     </aside>
@@ -176,13 +177,6 @@
                 <input type="checkbox" id="hexHideEqual" checked />
                 Só linhas com diferença
               </label>
-              <div class="toolbar__group hex-pager">
-                <button type="button" class="btn btn--sm" id="hexPageFirst" title="Primeira página">⏮</button>
-                <button type="button" class="btn btn--sm" id="hexPagePrev" title="Página anterior">◀</button>
-                <span id="hexPageLabel" class="hex-pager__label muted">1 / 1</span>
-                <button type="button" class="btn btn--sm" id="hexPageNext" title="Próxima página">▶</button>
-                <button type="button" class="btn btn--sm" id="hexPageLast" title="Última página">⏭</button>
-              </div>
               <div class="toolbar__group toolbar__group--edit">
                 <label class="inline toolbar__check" title="Clique nos bytes do painel B">
                   <input type="checkbox" id="hexEditB" checked />
@@ -237,6 +231,22 @@
                 </div>
               </div>
             </div>
+
+            <nav class="hex-pagination" id="hexPagination" aria-label="Paginação hex">
+              <div class="hex-pagination__nav">
+                <button type="button" class="btn btn--sm btn--ghost" data-page="first" title="Primeira página (Home)">⏮</button>
+                <button type="button" class="btn btn--sm" data-page="prev" title="Página anterior">◀ Anterior</button>
+                <label class="hex-pagination__page">
+                  <span class="muted">Página</span>
+                  <input type="number" id="hexPageInput" class="input-mono input--sm" min="1" value="1" aria-label="Número da página" />
+                  <span id="hexPageTotal" class="muted">/ 1</span>
+                </label>
+                <button type="button" class="btn btn--sm" data-page="next" title="Próxima página">Próxima ▶</button>
+                <button type="button" class="btn btn--sm btn--ghost" data-page="last" title="Última página (End)">⏭</button>
+              </div>
+              <p class="hex-pagination__meta muted" id="hexPageMeta">—</p>
+            </nav>
+
             <div class="card card--detail" id="wordDiffDetail" hidden>
               <h3>Detalhe da região</h3>
               <pre id="wordDiffPre" class="mono-block"></pre>
@@ -270,7 +280,13 @@
                 </tbody>
               </table>
             </div>
-            <div class="pager regions-pager" id="regionsPager" hidden></div>
+            <div class="pager regions-pager" id="regionsPager" hidden>
+              <button type="button" class="btn btn--sm btn--ghost" data-reg-page="first">⏮</button>
+              <button type="button" class="btn btn--sm" data-reg-page="prev">◀ Anterior</button>
+              <span class="pager__label" id="regionsPagerLabel">Página 1 / 1</span>
+              <button type="button" class="btn btn--sm" data-reg-page="next">Próxima ▶</button>
+              <button type="button" class="btn btn--sm btn--ghost" data-reg-page="last">⏭</button>
+            </div>
           </section>
 
           <section class="tab-panel" id="tab-heatmap">

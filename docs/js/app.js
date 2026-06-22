@@ -20,6 +20,17 @@ import {
 } from './diffEngine.js';
 import { scanDiffAsync } from './diffCompare.js';
 import {
+  HEX_ROWS_PER_PAGE,
+  computeHexView,
+  resolveHexRowOffset,
+  offsetToHexPage,
+  getPageOffsetRange,
+  formatHexEmptyMessage,
+  formatHexPagerMeta,
+  updateHexPagerControls,
+  initHexPager,
+} from './hexPager.js';
+import {
   loadAiSettings,
   saveAiSettings,
   clearAiSettings,
@@ -98,11 +109,9 @@ const state = {
 };
 
 const HEX_ROW_HEIGHT = 20;
-const HEX_ROWS_PER_PAGE = 40;
 const REGIONS_PAGE_SIZE = 100;
 const LARGE_FILE = 512 * 1024;
 const REGION_BATCH = 200;
-let hexRenderRaf = 0;
 const $ = (sel) => document.querySelector(sel);
 
 function activateTab(tabId) {
@@ -406,27 +415,40 @@ function getFilteredRegions() {
 
 function renderRegionsPager(totalPages, totalRows) {
   const pager = $('#regionsPager');
+  const label = $('#regionsPagerLabel');
   if (!pager) return;
+
   if (totalPages <= 1) {
     pager.hidden = true;
     return;
   }
+
   pager.hidden = false;
   const page = state.regionsPage + 1;
-  pager.innerHTML = `
-    <button type="button" class="btn btn--sm" data-reg-page="first">⏮</button>
-    <button type="button" class="btn btn--sm" data-reg-page="prev">◀</button>
-    <span class="pager__label">Página ${page} / ${totalPages} · ${totalRows} regiões</span>
-    <button type="button" class="btn btn--sm" data-reg-page="next">▶</button>
-    <button type="button" class="btn btn--sm" data-reg-page="last">⏭</button>
-  `;
+  if (label) {
+    label.textContent = `Página ${page} / ${totalPages} · ${totalRows.toLocaleString('pt-BR')} regiões`;
+  }
+
+  pager.querySelectorAll('[data-reg-page]').forEach((btn) => {
+    btn.disabled = false;
+  });
+  const atStart = state.regionsPage <= 0;
+  const atEnd = state.regionsPage >= totalPages - 1;
+  pager.querySelector('[data-reg-page="first"]')?.toggleAttribute('disabled', atStart);
+  pager.querySelector('[data-reg-page="prev"]')?.toggleAttribute('disabled', atStart);
+  pager.querySelector('[data-reg-page="next"]')?.toggleAttribute('disabled', atEnd);
+  pager.querySelector('[data-reg-page="last"]')?.toggleAttribute('disabled', atEnd);
+
+  if (pager.dataset.bound) return;
+  pager.dataset.bound = '1';
   pager.querySelectorAll('[data-reg-page]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const action = btn.dataset.regPage;
+      const pages = Math.ceil(getFilteredRegions().length / REGIONS_PAGE_SIZE);
       if (action === 'first') state.regionsPage = 0;
       else if (action === 'prev') state.regionsPage = Math.max(0, state.regionsPage - 1);
-      else if (action === 'next') state.regionsPage = Math.min(totalPages - 1, state.regionsPage + 1);
-      else if (action === 'last') state.regionsPage = totalPages - 1;
+      else if (action === 'next') state.regionsPage = Math.min(pages - 1, state.regionsPage + 1);
+      else if (action === 'last') state.regionsPage = pages - 1;
       renderRegionsTable();
     });
   });
@@ -890,86 +912,44 @@ function refreshDiffRowsAligned() {
   state.diffRows = rows;
 }
 
-function scheduleRenderHex() {
-  renderHex();
-}
-
-function getHexPageInfo() {
-  const cols = getHexCols();
-  const hideEqual = $('#hexHideEqual')?.checked;
-  const totalRows = hideEqual
-    ? state.diffRows.length
-    : Math.ceil((state.decodedA?.length || 0) / cols);
-  const totalPages = Math.max(1, Math.ceil(Math.max(totalRows, 1) / HEX_ROWS_PER_PAGE));
-  const page = Math.min(Math.max(0, state.hexPage), totalPages - 1);
-  state.hexPage = page;
-  const startRow = page * HEX_ROWS_PER_PAGE;
-  const endRow = Math.min(totalRows, startRow + HEX_ROWS_PER_PAGE);
-  return { page, totalPages, startRow, endRow, totalRows, hideEqual, cols };
-}
-
-function updateHexPagerLabel() {
-  const { page, totalPages, startRow, endRow, hideEqual, cols } = getHexPageInfo();
-  const label = $('#hexPageLabel');
-  if (label) label.textContent = `${page + 1} / ${totalPages}`;
-  const firstOff = hideEqual ? (state.diffRows[startRow] ?? 0) : startRow * cols;
-  const lastIdx = Math.max(startRow, endRow - 1);
-  const lastOff = hideEqual ? (state.diffRows[lastIdx] ?? firstOff) : lastIdx * cols;
-  return { firstOff, lastOff, cols };
-}
-
-function goHexPage(action) {
-  const { totalPages } = getHexPageInfo();
-  if (action === 'first') state.hexPage = 0;
-  else if (action === 'prev') state.hexPage = Math.max(0, state.hexPage - 1);
-  else if (action === 'next') state.hexPage = Math.min(totalPages - 1, state.hexPage + 1);
-  else if (action === 'last') state.hexPage = totalPages - 1;
-  renderHex();
-}
-
-function getHexRowModel() {
-  const hideEqual = $('#hexHideEqual')?.checked;
-  const cols = getHexCols();
-  if (hideEqual) {
-    return {
-      mode: 'diff-only',
-      rows: state.diffRows,
-      totalRows: state.diffRows.length,
-      rowOffset: (index) => state.diffRows[index],
-    };
-  }
-  const totalRows = Math.ceil(state.decodedA.length / cols);
+function getHexViewOptions() {
   return {
-    mode: 'full',
-    rows: null,
-    totalRows,
-    rowOffset: (index) => index * cols,
+    cols: getHexCols(),
+    hideEqual: !!$('#hexHideEqual')?.checked,
   };
 }
 
-function renderHexPane(side, scrollEl, contentEl) {
+function getHexView() {
+  const view = computeHexView(state, getHexViewOptions());
+  view._diffRows = state.diffRows;
+  state.hexPage = view.page;
+  return view;
+}
+
+function setHexPage(pageIndex) {
+  state.hexPage = pageIndex;
+  renderHex();
+}
+
+
+function renderHexPane(side, contentEl, view) {
   if (!state.decodedA || !state.decodedB || !contentEl) return;
 
-  const { startRow, endRow, hideEqual, cols } = getHexPageInfo();
+  if (view.isEmpty || view.rowCount === 0) {
+    contentEl.innerHTML = formatHexEmptyMessage(view.hideEqual);
+    return;
+  }
+
   const alignB = getHexAlignB();
   const synced = $('#hexSyncScroll')?.checked;
+  const { cols, startRow, endRow, hideEqual } = view;
+  view._diffRows = state.diffRows;
   const lines = [];
 
   for (let row = startRow; row < endRow; row++) {
-    let offsetA;
-    let offsetB;
-
-    if (hideEqual) {
-      offsetA = state.diffRows[row];
-      if (offsetA == null) continue;
-      offsetB = offsetA + alignB;
-    } else if (side === 'b' && !synced) {
-      offsetB = row * cols;
-      offsetA = offsetB - alignB;
-    } else {
-      offsetA = row * cols;
-      offsetB = offsetA + alignB;
-    }
+    const resolved = resolveHexRowOffset(view, row, { alignB, synced, side });
+    if (!resolved) continue;
+    const { offsetA, offsetB } = resolved;
 
     if (side === 'a') {
       if (offsetA < 0 || offsetA >= state.decodedA.length) {
@@ -987,14 +967,14 @@ function renderHexPane(side, scrollEl, contentEl) {
     }
   }
 
-  contentEl.style.transform = '';
   contentEl.innerHTML = lines.join('');
 
   if (side === 'a') {
     const first = hideEqual ? (state.diffRows[startRow] ?? 0) : startRow * cols;
     const lastIdx = Math.max(startRow, endRow - 1);
     const last = hideEqual ? (state.diffRows[lastIdx] ?? first) : lastIdx * cols;
-    $('#hexLabelA').textContent = `0x${first.toString(16).toUpperCase()} – 0x${(last + cols).toString(16).toUpperCase()}`;
+    const label = $('#hexLabelA');
+    if (label) label.textContent = `0x${first.toString(16).toUpperCase()} – 0x${(last + cols).toString(16).toUpperCase()}`;
   } else {
     let first;
     let last;
@@ -1009,17 +989,28 @@ function renderHexPane(side, scrollEl, contentEl) {
       first = startRow * cols + alignB;
       last = (endRow - 1) * cols + alignB;
     }
-    $('#hexLabelB').textContent = `0x${Math.max(0, first).toString(16).toUpperCase()} – 0x${(last + cols).toString(16).toUpperCase()}`;
+    const label = $('#hexLabelB');
+    if (label) label.textContent = `0x${Math.max(0, first).toString(16).toUpperCase()} – 0x${(last + cols).toString(16).toUpperCase()}`;
   }
 }
 
 function renderHex() {
   if (!state.decodedA || !state.decodedB) return;
-  renderHexPane('a', $('#hexScrollA'), $('#hexContentA'));
-  renderHexPane('b', $('#hexScrollB'), $('#hexContentB'));
+
+  const view = getHexView();
+  const alignB = getHexAlignB();
+  const range = getPageOffsetRange(view, state, alignB);
+
+  renderHexPane('a', $('#hexContentA'), view);
+  renderHexPane('b', $('#hexContentB'), view);
   updateEditStatus();
-  const { firstOff, lastOff } = updateHexPagerLabel();
-  updateHexMapLabels(firstOff, firstOff + getHexAlignB());
+
+  const meta = $('#hexPageMeta');
+  if (meta) meta.textContent = formatHexPagerMeta(view, range, alignB);
+  updateHexPagerControls(view);
+
+  const firstOff = range.firstA;
+  updateHexMapLabels(firstOff, firstOff + alignB);
   state.hexOffset = firstOff;
   const offsetEl = $('#hexOffset');
   if (offsetEl && document.activeElement !== offsetEl) {
@@ -1028,26 +1019,20 @@ function renderHex() {
 }
 
 function scrollHexToOffset(offset) {
-  const cols = getHexCols();
-  const hideEqual = $('#hexHideEqual')?.checked;
-  let rowIndex;
-  if (hideEqual) {
-    rowIndex = state.diffRows.findIndex((off) => off >= offset);
-    if (rowIndex < 0) rowIndex = Math.max(0, state.diffRows.length - 1);
-  } else {
-    rowIndex = Math.floor(offset / cols);
-  }
-  state.hexPage = Math.floor(rowIndex / HEX_ROWS_PER_PAGE);
+  const opts = getHexViewOptions();
+  state.hexPage = offsetToHexPage(offset, state, opts);
   state.hexOffset = offset;
-  $('#hexOffset').value = '0x' + offset.toString(16).toUpperCase();
+  const offsetEl = $('#hexOffset');
+  if (offsetEl) offsetEl.value = '0x' + offset.toString(16).toUpperCase();
   renderHex();
 }
 
 function jumpToDiff(direction) {
   if (!state.diffRows.length) return;
-  const hideEqual = $('#hexHideEqual')?.checked;
+  const view = getHexView();
+  const { startRow } = view;
   const cols = getHexCols();
-  const { startRow } = getHexPageInfo();
+  const hideEqual = view.hideEqual;
   const currentOffset = hideEqual
     ? state.diffRows[startRow] ?? state.diffRows[0]
     : startRow * cols;
@@ -1325,11 +1310,6 @@ function initEvents() {
     renderHex();
   });
 
-  on('#hexPageFirst', 'click', () => goHexPage('first'));
-  on('#hexPagePrev', 'click', () => goHexPage('prev'));
-  on('#hexPageNext', 'click', () => goHexPage('next'));
-  on('#hexPageLast', 'click', () => goHexPage('last'));
-
   const bindDiffNav = (dir) => () => jumpToDiff(dir);
   on('#hexDiffPrev', 'click', bindDiffNav(-1));
   on('#hexDiffNext', 'click', bindDiffNav(1));
@@ -1369,6 +1349,7 @@ function initEvents() {
 
 initTabs();
 initEvents();
+initHexPager(setHexPage);
 initAiSettings();
 initHexEditor();
 initMappack();
@@ -1380,6 +1361,16 @@ initKeyboardShortcuts({
   onNextDiff: () => { if ($('#tab-hex')?.classList.contains('active')) jumpToDiff(1); },
   onPrevDiff: () => { if ($('#tab-hex')?.classList.contains('active')) jumpToDiff(-1); },
   onTab: activateTab,
+  onHexPagePrev: () => {
+    if (!$('#tab-hex')?.classList.contains('active')) return;
+    const v = getHexView();
+    setHexPage(Math.max(0, v.page - 1));
+  },
+  onHexPageNext: () => {
+    if (!$('#tab-hex')?.classList.contains('active')) return;
+    const v = getHexView();
+    setHexPage(Math.min(v.totalPages - 1, v.page + 1));
+  },
 });
 window.addEventListener('resize', () => {
   if ($('#tab-hex')?.classList.contains('active')) renderHex();
