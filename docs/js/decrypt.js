@@ -33,17 +33,30 @@ export function readU16(buffer, offset, endian = 'be') {
   return endian === 'be' ? view.getUint16(offset, false) : view.getUint16(offset, true);
 }
 
-export function formatHexLine(buffer, offset, cols, diffMask = null, side = 'a') {
+export function formatHexLine(buffer, offset, cols, diffMask = null, side = 'a', wrapRow = false, options = {}) {
+  const { editable = false, isEdited = null } = options;
   const end = Math.min(offset + cols, buffer.length);
   let line = `<span class="offset">${offset.toString(16).toUpperCase().padStart(6, '0')}</span>  `;
   const bytes = [];
   const ascii = [];
+  let rowHasDiff = false;
+
+  const isDiffAt = (byteOffset) => {
+    if (!diffMask) return false;
+    if (typeof diffMask === 'function') return diffMask(byteOffset);
+    return diffMask.has(byteOffset);
+  };
 
   for (let i = offset; i < end; i++) {
     const b = buffer[i];
-    const isDiff = diffMask && diffMask.has(i);
-    const cls = isDiff ? (side === 'a' ? 'diff-a' : 'diff-b') : 'same';
-    bytes.push(`<span class="${cls}">${b.toString(16).toUpperCase().padStart(2, '0')}</span>`);
+    const isDiff = isDiffAt(i);
+    if (isDiff) rowHasDiff = true;
+    const edited = isEdited?.(i);
+    let cls = isDiff ? (side === 'a' ? 'diff-a' : 'diff-b') : 'same';
+    if (edited) cls += ' hex-byte--edited';
+    const hex = b.toString(16).toUpperCase().padStart(2, '0');
+    const editAttr = editable ? ` data-editable="1" data-side="${side}"` : '';
+    bytes.push(`<span class="hex-byte ${cls}" data-offset="${i}"${editAttr} title="${editable ? 'Clique para editar' : ''}">${hex}</span>`);
     ascii.push(b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : '.');
   }
 
@@ -53,7 +66,9 @@ export function formatHexLine(buffer, offset, cols, diffMask = null, side = 'a')
   }
 
   line += bytes.join(' ') + '  |' + ascii.join('') + '|';
-  return line;
+  if (!wrapRow) return line;
+  const rowCls = rowHasDiff ? 'hex-line hex-line--diff' : 'hex-line';
+  return `<div class="${rowCls}" data-offset="${offset}">${line}</div>`;
 }
 
 export function formatWordLine(buffer, offset, count, endian, diffWords = null) {

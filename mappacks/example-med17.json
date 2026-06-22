@@ -1,0 +1,77 @@
+{
+  "name": "Exemplo MED17.5 — estrutura ilustrativa",
+  "version": "1.0",
+  "ecu": "MED17.5",
+  "sw": ["10SW0000000000"],
+  "author": "MrReadeBin",
+  "notes": "Offsets de exemplo para demonstrar o formato. Substitua pelos endereços reais do seu projeto WinOLS ou exportação manual.",
+  "maps": [
+    {
+      "id": "boost_target",
+      "name": "Boost Target Pressure",
+      "category": "Turbo",
+      "description": "Pressão alvo de boost (mapa 2D)",
+      "offset": "0x180000",
+      "rows": 16,
+      "cols": 12,
+      "dataType": "u16be",
+      "factor": 1,
+      "unit": "mbar",
+      "axisX": { "unit": "RPM", "description": "Rotação do motor" },
+      "axisY": { "unit": "mg/str", "description": "Quantidade de injeção" }
+    },
+    {
+      "id": "torque_limit",
+      "name": "Torque Limiter",
+      "category": "Torque",
+      "description": "Limite de solicitação de torque",
+      "offset": "0x182000",
+      "rows": 1,
+      "cols": 20,
+      "dataType": "u16be",
+      "factor": 0.1,
+      "unit": "Nm",
+      "axisX": { "unit": "RPM", "description": "Rotação" }
+    },
+    {
+      "id": "ign_timing_main",
+      "name": "Ignition Timing Main",
+      "category": "Ignição",
+      "description": "Avanço de ignição principal",
+      "offset": "0x190000",
+      "rows": 14,
+      "cols": 16,
+      "dataType": "u16be",
+      "factor": 0.0234375,
+      "offsetValue": -50,
+      "unit": "°BTDC",
+      "axisX": { "unit": "RPM", "description": "Rotação" },
+      "axisY": { "unit": "hPa", "description": "Carga / pressão" }
+    },
+    {
+      "id": "inj_duration",
+      "name": "Injection Duration",
+      "category": "Injeção",
+      "description": "Tempo de injeção",
+      "offset": "0x1A0000",
+      "rows": 12,
+      "cols": 10,
+      "dataType": "u16be",
+      "factor": 0.001,
+      "unit": "ms"
+    },
+    {
+      "id": "smoke_limit",
+      "name": "Smoke Limiter",
+      "category": "Injeção",
+      "description": "Limite de fumaça / quantidade máxima",
+      "signature": "DEADBEEFCAFEBABE",
+      "offsetFromSignature": "0x40",
+      "rows": 8,
+      "cols": 8,
+      "dataType": "u16be",
+      "unit": "mg/str",
+      "description": "Exemplo com assinatura (padrão de bytes) em vez de offset fixo — estilo WinOLS"
+    }
+  ]
+}

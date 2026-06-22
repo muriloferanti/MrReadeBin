@@ -3,174 +3,380 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ECU Map Diff Viewer — MED17</title>
+  <title>MrReadeBin — ECU Map Diff Viewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/app.css" />
 </head>
 <body>
   <header class="header">
-    <div class="header__brand">
-      <h1>ECU Map Diff Viewer</h1>
-      <p class="subtitle">Decodificação e comparação de bins Bosch MED17 / EDC17 — 100% no navegador</p>
+    <div class="header__left">
+      <button type="button" id="btnSidebar" class="btn btn--icon header__menu" aria-label="Abrir painel" aria-expanded="false">☰</button>
+      <div class="header__brand">
+        <h1>MrReadeBin</h1>
+        <p class="subtitle">Comparação de bins Bosch MED17 / EDC17</p>
+      </div>
     </div>
+
+    <nav class="steps" aria-label="Progresso">
+      <div class="step step--active" data-step="1"><span class="step__num">1</span><span class="step__label">Carregar</span></div>
+      <div class="step__line"></div>
+      <div class="step" data-step="2"><span class="step__num">2</span><span class="step__label">Comparar</span></div>
+      <div class="step__line"></div>
+      <div class="step" data-step="3"><span class="step__num">3</span><span class="step__label">Analisar</span></div>
+    </nav>
+
     <div class="header__actions">
-      <button id="btnCompare" class="btn btn--primary" disabled>Comparar</button>
-      <button id="btnExport" class="btn btn--ghost" disabled>Exportar relatório</button>
+      <button type="button" id="btnSettings" class="btn btn--ghost" title="Configuração de IA">⚙ IA</button>
+      <button type="button" id="btnExport" class="btn btn--ghost" disabled>Exportar</button>
     </div>
   </header>
 
+  <div class="sidebar-backdrop" aria-hidden="true"></div>
+
   <main class="layout">
-    <aside class="sidebar">
-      <section class="panel">
-        <h2>Arquivo A</h2>
-        <div class="dropzone" id="dropA" data-slot="A">
-          <p>Arraste o .bin aqui ou clique para selecionar</p>
-          <input type="file" id="fileA" accept=".bin,.ori,.mod,*" hidden />
+    <aside class="sidebar" id="sidebar">
+      <section class="panel panel--files">
+        <div class="panel__head">
+          <h2>Arquivos</h2>
+          <div class="panel__actions">
+            <button type="button" id="btnSwap" class="btn btn--sm btn--ghost" title="Trocar A e B" disabled>⇄</button>
+            <button type="button" id="btnClear" class="btn btn--sm btn--ghost" title="Limpar arquivos" disabled>Limpar</button>
+          </div>
         </div>
-        <div id="infoA" class="file-info muted">Nenhum arquivo carregado</div>
+
+        <div class="file-slot">
+          <span class="file-slot__label">Original <span class="file-slot__tag">A</span></span>
+          <div class="dropzone" id="dropA" data-slot="A">
+            <span class="dropzone__icon">📂</span>
+            <p>Arraste ou clique para selecionar</p>
+            <span class="dropzone__hint">.bin, .ori, .mod</span>
+            <input type="file" id="fileA" accept=".bin,.ori,.mod,*" hidden />
+          </div>
+          <div id="infoA" class="file-info muted">Nenhum arquivo</div>
+        </div>
+
+        <div class="file-slot">
+          <span class="file-slot__label">Modificado <span class="file-slot__tag file-slot__tag--b">B</span></span>
+          <div class="dropzone" id="dropB" data-slot="B">
+            <span class="dropzone__icon">📂</span>
+            <p>Arraste ou clique para selecionar</p>
+            <span class="dropzone__hint">.bin, .ori, .mod</span>
+            <input type="file" id="fileB" accept=".bin,.ori,.mod,*" hidden />
+          </div>
+          <div id="infoB" class="file-info muted">Nenhum arquivo</div>
+        </div>
       </section>
 
       <section class="panel">
-        <h2>Arquivo B</h2>
-        <div class="dropzone" id="dropB" data-slot="B">
-          <p>Arraste o .bin aqui ou clique para selecionar</p>
-          <input type="file" id="fileB" accept=".bin,.ori,.mod,*" hidden />
+        <button type="button" class="panel__collapse" data-collapse aria-expanded="true">
+          <h2>Decodificação</h2>
+          <span class="panel__chevron">▾</span>
+        </button>
+        <div class="panel__body">
+          <label class="field">
+            <span>Modo de leitura</span>
+            <select id="decodeMode">
+              <option value="raw">Raw (hex)</option>
+              <option value="u16be" selected>UInt16 Big-Endian (Bosch)</option>
+              <option value="u16le">UInt16 Little-Endian</option>
+              <option value="xor">XOR (chave manual)</option>
+            </select>
+          </label>
+          <label class="field" id="xorField" hidden>
+            <span>Chave XOR (hex)</span>
+            <input type="text" id="xorKey" value="00" placeholder="A5 ou A5B3" />
+          </label>
+          <label class="field">
+            <span>Bytes por linha (hex)</span>
+            <select id="hexCols">
+              <option value="16" selected>16 bytes</option>
+              <option value="8">8 bytes</option>
+              <option value="32">32 bytes</option>
+            </select>
+          </label>
         </div>
-        <div id="infoB" class="file-info muted">Nenhum arquivo carregado</div>
       </section>
 
-      <section class="panel">
-        <h2>Decodificação</h2>
-        <label class="field">
-          <span>Modo de leitura</span>
-          <select id="decodeMode">
-            <option value="raw">Raw (hex)</option>
-            <option value="u16be" selected>UInt16 Big-Endian (Bosch)</option>
-            <option value="u16le">UInt16 Little-Endian</option>
-            <option value="xor">XOR (chave manual)</option>
-          </select>
-        </label>
-        <label class="field" id="xorField" hidden>
-          <span>Chave XOR (hex, ex: A5 ou A5B3)</span>
-          <input type="text" id="xorKey" value="00" placeholder="00" />
-        </label>
-        <label class="field">
-          <span>Tamanho do bloco hex</span>
-          <select id="hexCols">
-            <option value="16" selected>16 bytes</option>
-            <option value="8">8 bytes</option>
-            <option value="32">32 bytes</option>
-          </select>
-        </label>
+      <section class="panel" id="mappackPanel">
+        <h2>Mappack</h2>
+        <p class="hint panel-hint">Arquivo auxiliar com nomes e offsets dos mapas (boost, torque, ignição…). Separado do .bin.</p>
+        <div class="dropzone dropzone--compact" id="dropMappack">
+          <p>Carregar .json ou .kp</p>
+          <input type="file" id="fileMappack" accept=".json,.kp,*" hidden />
+        </div>
+        <div class="panel__actions mappack-actions">
+          <button type="button" class="btn btn--sm btn--ghost" id="btnLoadExampleMappack">Exemplo</button>
+          <button type="button" class="btn btn--sm btn--ghost" id="btnClearMappack" disabled>Remover</button>
+        </div>
+        <div id="mappackInfo" class="file-info muted">Nenhum mappack</div>
       </section>
 
       <section class="panel" id="summaryPanel" hidden>
-        <h2>Resumo da comparação</h2>
+        <h2>Resumo</h2>
+        <div class="similarity">
+          <div class="similarity__header">
+            <span>Similaridade</span>
+            <span id="similarityLabel" class="similarity__value">—</span>
+          </div>
+          <div class="similarity__track">
+            <div id="similarityBar" class="similarity-bar__fill"></div>
+          </div>
+        </div>
         <dl class="stats" id="diffStats"></dl>
+      </section>
+
+      <section class="panel panel--help">
+        <h2>Atalhos</h2>
+        <ul class="shortcut-list">
+          <li><kbd>N</kbd> / <kbd>P</kbd> diferenças</li>
+          <li>Clique no hex <strong>B</strong> para editar byte</li>
+          <li>Duplo-clique no <strong>A</strong> copia para B</li>
+        </ul>
       </section>
     </aside>
 
     <div class="content">
-      <nav class="tabs" role="tablist">
-        <button class="tab active" data-tab="metadata">Metadados</button>
-        <button class="tab" data-tab="regions">Regiões alteradas</button>
-        <button class="tab" data-tab="hex">Hex diff</button>
-        <button class="tab" data-tab="heatmap">Mapa de calor</button>
-        <button class="tab" data-tab="strings">Strings</button>
-        <button class="tab" data-tab="sections">Seções binárias</button>
-      </nav>
+      <section id="emptyState" class="empty-state">
+        <div class="empty-state__icon">⚡</div>
+        <h2>Compare dois arquivos de ECU</h2>
+        <p class="empty-state__text">Carregue o bin <strong>original</strong> e o <strong>modificado</strong> no painel à esquerda. A comparação começa automaticamente.</p>
+        <ol class="empty-state__steps">
+          <li>Arraste os arquivos ou clique nas áreas de upload</li>
+          <li>Veja as diferenças no hex lado a lado</li>
+          <li>Use IA para interpretar as alterações (opcional)</li>
+        </ol>
+      </section>
 
-      <div class="tab-panels">
-        <section class="tab-panel active" id="tab-metadata">
-          <div class="grid-2">
-            <div class="card" id="metaA"><h3>Arquivo A</h3><p class="muted">Carregue um arquivo</p></div>
-            <div class="card" id="metaB"><h3>Arquivo B</h3><p class="muted">Carregue um arquivo</p></div>
-          </div>
-        </section>
+      <div class="content__main" hidden>
+        <nav class="tabs" role="tablist" aria-label="Visualizações">
+          <button type="button" class="tab active" data-tab="hex">Hex diff <span class="tab__badge" id="tabBadgeHex" hidden>●</span></button>
+          <button type="button" class="tab" data-tab="regions">Regiões <span class="tab__badge" id="tabBadgeRegions" hidden>0</span></button>
+          <button type="button" class="tab" data-tab="heatmap">Mapa de calor</button>
+          <button type="button" class="tab" data-tab="metadata">Metadados</button>
+          <button type="button" class="tab" data-tab="ai">Sugestões IA</button>
+          <button type="button" class="tab" data-tab="mappack">Mappack</button>
+          <button type="button" class="tab" data-tab="strings">Strings</button>
+          <button type="button" class="tab" data-tab="sections">Seções</button>
+        </nav>
 
-        <section class="tab-panel" id="tab-regions">
-          <div class="toolbar">
-            <input type="search" id="regionFilter" placeholder="Filtrar por offset (hex)..." />
-            <label class="inline">
-              <input type="checkbox" id="onlyCalibration" />
-              Só calibração provável
-            </label>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table" id="regionsTable">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Offset</th>
-                  <th>Tamanho</th>
-                  <th>Tipo</th>
-                  <th>Alterações (bytes)</th>
-                  <th>Δ médio U16 BE</th>
-                  <th>Ações</th>
-                </tr>
-              </thead>
-              <tbody id="regionsBody">
-                <tr><td colspan="7" class="muted center">Compare dois arquivos para ver regiões</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="tab-panel" id="tab-hex">
-          <div class="toolbar">
-            <label class="inline">
-              Offset:
-              <input type="text" id="hexOffset" value="0" class="input-mono" />
-            </label>
-            <button class="btn btn--sm" id="hexPrev">◀ Bloco anterior</button>
-            <button class="btn btn--sm" id="hexNext">Próximo bloco ▶</button>
-            <label class="inline">
-              <input type="checkbox" id="hexOnlyDiff" checked />
-              Destacar só diferenças
-            </label>
-          </div>
-          <div class="hex-grid">
-            <div class="hex-pane">
-              <h3>Arquivo A <span id="hexLabelA"></span></h3>
-              <pre id="hexViewA" class="hex-view"></pre>
+        <div class="tab-panels">
+          <section class="tab-panel tab-panel--hex active" id="tab-hex">
+            <div class="toolbar hex-toolbar">
+              <div class="toolbar__group">
+                <label class="inline">
+                  Offset
+                  <input type="text" id="hexOffset" value="0" class="input-mono input--sm" placeholder="0x1A40" />
+                </label>
+                <button type="button" class="btn btn--sm" id="hexDiffPrev" title="Anterior (P)">▲</button>
+                <button type="button" class="btn btn--sm" id="hexDiffNext" title="Próxima (N)">▼</button>
+              </div>
+              <label class="inline toolbar__check">
+                <input type="checkbox" id="hexHideEqual" />
+                Só linhas com diferença
+              </label>
+              <div class="toolbar__group toolbar__group--edit">
+                <label class="inline toolbar__check" title="Clique nos bytes do painel B">
+                  <input type="checkbox" id="hexEditB" checked />
+                  Editar B
+                </label>
+                <label class="inline toolbar__check" title="Clique nos bytes do painel A">
+                  <input type="checkbox" id="hexEditA" />
+                  Editar A
+                </label>
+                <span id="editStatus" class="edit-status muted"></span>
+                <button type="button" class="btn btn--sm" id="btnRevertEdits" disabled>Reverter</button>
+                <button type="button" class="btn btn--sm btn--primary" id="btnDownloadEdited" disabled>Baixar editado</button>
+              </div>
             </div>
-            <div class="hex-pane">
-              <h3>Arquivo B <span id="hexLabelB"></span></h3>
-              <pre id="hexViewB" class="hex-view"></pre>
+            <div class="hex-compare">
+              <div class="hex-pane">
+                <div class="hex-pane__head">
+                  <h3>Original <span class="hex-pane__tag">A</span></h3>
+                  <div class="hex-pane__meta">
+                    <span id="hexMapLabelA" class="hex-pane__map muted"></span>
+                    <span id="hexLabelA" class="hex-pane__offset muted"></span>
+                  </div>
+                </div>
+                <div class="hex-scroll" id="hexScrollA">
+                  <div class="hex-spacer" id="hexSpacerA"></div>
+                  <div class="hex-content" id="hexContentA"></div>
+                </div>
+              </div>
+
+              <div class="hex-sync-bar">
+                <label class="hex-sync-bar__connect" title="Rolar as duas telas juntas">
+                  <input type="checkbox" id="hexSyncScroll" checked />
+                  <span>Vincular</span>
+                </label>
+                <label class="hex-sync-bar__field" title="Deslocamento do B em relação ao A">
+                  <span>Offset B</span>
+                  <input type="text" id="hexAlignB" value="0" class="input-mono" />
+                </label>
+                <button type="button" class="btn btn--sm hex-sync-bar__btn" id="hexDiffPrevBar" title="Anterior">▲</button>
+                <button type="button" class="btn btn--sm hex-sync-bar__btn" id="hexDiffNextBar" title="Próxima">▼</button>
+              </div>
+
+              <div class="hex-pane">
+                <div class="hex-pane__head">
+                  <h3>Modificado <span class="hex-pane__tag hex-pane__tag--b">B</span></h3>
+                  <div class="hex-pane__meta">
+                    <span id="hexMapLabelB" class="hex-pane__map muted"></span>
+                    <span id="hexLabelB" class="hex-pane__offset muted"></span>
+                  </div>
+                </div>
+                <div class="hex-scroll" id="hexScrollB">
+                  <div class="hex-spacer" id="hexSpacerB"></div>
+                  <div class="hex-content" id="hexContentB"></div>
+                </div>
+              </div>
             </div>
-          </div>
-          <div class="card" id="wordDiffDetail" hidden>
-            <h3>Detalhe da região selecionada</h3>
-            <pre id="wordDiffPre" class="mono-block"></pre>
-          </div>
-        </section>
+            <div class="card card--detail" id="wordDiffDetail" hidden>
+              <h3>Detalhe da região</h3>
+              <pre id="wordDiffPre" class="mono-block"></pre>
+            </div>
+          </section>
 
-        <section class="tab-panel" id="tab-heatmap">
-          <p class="hint">Cada pixel = 4 KB do flash. Vermelho = região com diferenças. Clique para ir ao hex.</p>
-          <canvas id="heatmap" width="512" height="128"></canvas>
-          <div id="heatmapLegend" class="legend"></div>
-        </section>
+          <section class="tab-panel" id="tab-regions">
+            <div class="toolbar">
+              <input type="search" id="regionFilter" class="input--search" placeholder="Filtrar offset (hex)…" />
+              <label class="inline">
+                <input type="checkbox" id="onlyCalibration" />
+                Só calibração
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table" id="regionsTable">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Offset</th>
+                    <th>Tamanho</th>
+                    <th>Tipo</th>
+                    <th>Bytes</th>
+                    <th>Δ U16</th>
+                    <th>Mapa</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="regionsBody">
+                  <tr><td colspan="8" class="muted center">Nenhuma região</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
 
-        <section class="tab-panel" id="tab-strings">
-          <div class="grid-2">
-            <div class="card"><h3>Strings — A</h3><pre id="stringsA" class="mono-block scroll"></pre></div>
-            <div class="card"><h3>Strings — B</h3><pre id="stringsB" class="mono-block scroll"></pre></div>
-          </div>
-        </section>
+          <section class="tab-panel" id="tab-heatmap">
+            <p class="hint">Cada célula ≈ 4 KB. Vermelho = diferenças. Clique para abrir no hex.</p>
+            <canvas id="heatmap" width="512" height="128"></canvas>
+            <div id="heatmapLegend" class="legend"></div>
+          </section>
 
-        <section class="tab-panel" id="tab-sections">
-          <p class="hint">Análise heurística de seções: texto ECU, calibração, vazio e alta entropia.</p>
-          <div class="grid-2">
-            <div class="card"><h3>Seções — A</h3><div id="sectionsA"></div></div>
-            <div class="card"><h3>Seções — B</h3><div id="sectionsB"></div></div>
-          </div>
-        </section>
+          <section class="tab-panel" id="tab-metadata">
+            <div class="grid-2">
+              <div class="card" id="metaA"><h3>Original (A)</h3><p class="muted">Carregue um arquivo</p></div>
+              <div class="card" id="metaB"><h3>Modificado (B)</h3><p class="muted">Carregue um arquivo</p></div>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="tab-ai">
+            <div class="ai-panel">
+              <div class="toolbar ai-toolbar">
+                <button type="button" id="btnAiAnalyze" class="btn btn--primary" disabled>Analisar com IA</button>
+                <button type="button" id="btnAiRegion" class="btn btn--sm" disabled>Região selecionada</button>
+                <span id="aiStatus" class="muted ai-status"></span>
+              </div>
+              <p class="hint">
+                Envia só metadados e resumo das diferenças — não o binário completo.
+                <button type="button" class="link-btn" id="btnSettingsInline">Configurar chave API</button>
+              </p>
+              <label class="field ai-question">
+                <span>Pergunta opcional</span>
+                <textarea id="aiQuestion" rows="2" placeholder="Ex.: Parece stage 1 ou só DPF off?"></textarea>
+              </label>
+              <div id="aiResult" class="ai-result muted">
+                <p>Compare dois arquivos e clique em <em>Analisar com IA</em>.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="tab-mappack">
+            <p class="hint">Definições carregadas no painel lateral. Clique em <em>Hex</em> para ir ao offset do mapa.</p>
+            <input type="search" id="mappackFilter" class="input--search" placeholder="Buscar mapa (boost, torque…)" />
+            <div class="table-wrap" id="mappackTableWrap">
+              <p class="muted center" style="padding:1rem">Carregue um mappack .json</p>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="tab-strings">
+            <div class="grid-2">
+              <div class="card"><h3>Strings — A</h3><pre id="stringsA" class="mono-block scroll"></pre></div>
+              <div class="card"><h3>Strings — B</h3><pre id="stringsB" class="mono-block scroll"></pre></div>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="tab-sections">
+            <p class="hint">Seções heurísticas: texto ECU, calibração, vazio e alta entropia.</p>
+            <div class="grid-2">
+              <div class="card"><h3>Seções — A</h3><div id="sectionsA"></div></div>
+              <div class="card"><h3>Seções — B</h3><div id="sectionsB"></div></div>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   </main>
 
   <footer class="footer">
-    <span>Processamento 100% local — os arquivos <strong>não saem do seu navegador</strong>. Compatível com GitHub Pages.</span>
+    <span>Processamento local dos .bin · IA envia apenas metadados e resumo das diferenças</span>
   </footer>
+
+  <div id="hexEditor" class="hex-editor" hidden>
+    <label class="hex-editor__label">Byte (hex)</label>
+    <input type="text" id="hexEditorInput" class="hex-editor__input input-mono" maxlength="2" autocomplete="off" spellcheck="false" />
+    <span class="hex-editor__hint muted">Enter · Esc cancela</span>
+  </div>
+
+  <div id="toastHost" class="toast-host" aria-live="polite"></div>
+
+  <dialog id="settingsDialog" class="settings-dialog">
+    <form id="settingsForm" method="dialog">
+      <header class="settings-dialog__head">
+        <h2>Configuração de IA</h2>
+        <button type="button" class="btn btn--ghost btn--sm" id="btnCloseSettings" aria-label="Fechar">✕</button>
+      </header>
+      <p class="hint">Chave salva só neste navegador (localStorage).</p>
+      <p class="hint settings-cors-hint">OpenAI pode bloquear por CORS. Prefira <strong>Anthropic</strong>, <strong>Gemini</strong> ou endpoint <strong>compatível OpenAI</strong> (Groq, LM Studio).</p>
+      <label class="field">
+        <span>Provedor</span>
+        <select id="aiProvider">
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="openai_compat">Compatível OpenAI</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Chave de API</span>
+        <input type="password" id="aiApiKey" autocomplete="off" placeholder="sk-…" />
+      </label>
+      <label class="field" id="aiBaseUrlField" hidden>
+        <span>URL base</span>
+        <input type="url" id="aiBaseUrl" placeholder="https://api.groq.com/openai/v1" />
+      </label>
+      <label class="field">
+        <span>Modelo</span>
+        <select id="aiModelSelect"></select>
+        <input type="text" id="aiModelCustom" class="input-mono" placeholder="nome-do-modelo" hidden />
+      </label>
+      <div class="settings-dialog__actions">
+        <button type="submit" class="btn btn--primary">Salvar</button>
+        <button type="button" class="btn btn--ghost" id="btnClearAiKey">Remover chave</button>
+      </div>
+      <p id="aiSettingsStatus" class="settings-status muted"></p>
+    </form>
+  </dialog>
 
   <script type="module" src="js/app.js"></script>
 </body>
