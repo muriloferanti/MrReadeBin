@@ -2,10 +2,176 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="refresh" content="0; url=docs/" />
-  <title>ECU Map Diff Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ECU Map Diff Viewer — MED17</title>
+  <link rel="stylesheet" href="css/app.css" />
 </head>
 <body>
-  <p><a href="docs/">Abrir ECU Map Diff Viewer</a></p>
+  <header class="header">
+    <div class="header__brand">
+      <h1>ECU Map Diff Viewer</h1>
+      <p class="subtitle">Decodificação e comparação de bins Bosch MED17 / EDC17 — 100% no navegador</p>
+    </div>
+    <div class="header__actions">
+      <button id="btnCompare" class="btn btn--primary" disabled>Comparar</button>
+      <button id="btnExport" class="btn btn--ghost" disabled>Exportar relatório</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <section class="panel">
+        <h2>Arquivo A</h2>
+        <div class="dropzone" id="dropA" data-slot="A">
+          <p>Arraste o .bin aqui ou clique para selecionar</p>
+          <input type="file" id="fileA" accept=".bin,.ori,.mod,*" hidden />
+        </div>
+        <div id="infoA" class="file-info muted">Nenhum arquivo carregado</div>
+      </section>
+
+      <section class="panel">
+        <h2>Arquivo B</h2>
+        <div class="dropzone" id="dropB" data-slot="B">
+          <p>Arraste o .bin aqui ou clique para selecionar</p>
+          <input type="file" id="fileB" accept=".bin,.ori,.mod,*" hidden />
+        </div>
+        <div id="infoB" class="file-info muted">Nenhum arquivo carregado</div>
+      </section>
+
+      <section class="panel">
+        <h2>Decodificação</h2>
+        <label class="field">
+          <span>Modo de leitura</span>
+          <select id="decodeMode">
+            <option value="raw">Raw (hex)</option>
+            <option value="u16be" selected>UInt16 Big-Endian (Bosch)</option>
+            <option value="u16le">UInt16 Little-Endian</option>
+            <option value="xor">XOR (chave manual)</option>
+          </select>
+        </label>
+        <label class="field" id="xorField" hidden>
+          <span>Chave XOR (hex, ex: A5 ou A5B3)</span>
+          <input type="text" id="xorKey" value="00" placeholder="00" />
+        </label>
+        <label class="field">
+          <span>Tamanho do bloco hex</span>
+          <select id="hexCols">
+            <option value="16" selected>16 bytes</option>
+            <option value="8">8 bytes</option>
+            <option value="32">32 bytes</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="panel" id="summaryPanel" hidden>
+        <h2>Resumo da comparação</h2>
+        <dl class="stats" id="diffStats"></dl>
+      </section>
+    </aside>
+
+    <div class="content">
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-tab="metadata">Metadados</button>
+        <button class="tab" data-tab="regions">Regiões alteradas</button>
+        <button class="tab" data-tab="hex">Hex diff</button>
+        <button class="tab" data-tab="heatmap">Mapa de calor</button>
+        <button class="tab" data-tab="strings">Strings</button>
+        <button class="tab" data-tab="sections">Seções binárias</button>
+      </nav>
+
+      <div class="tab-panels">
+        <section class="tab-panel active" id="tab-metadata">
+          <div class="grid-2">
+            <div class="card" id="metaA"><h3>Arquivo A</h3><p class="muted">Carregue um arquivo</p></div>
+            <div class="card" id="metaB"><h3>Arquivo B</h3><p class="muted">Carregue um arquivo</p></div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-regions">
+          <div class="toolbar">
+            <input type="search" id="regionFilter" placeholder="Filtrar por offset (hex)..." />
+            <label class="inline">
+              <input type="checkbox" id="onlyCalibration" />
+              Só calibração provável
+            </label>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="regionsTable">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Offset</th>
+                  <th>Tamanho</th>
+                  <th>Tipo</th>
+                  <th>Alterações (bytes)</th>
+                  <th>Δ médio U16 BE</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody id="regionsBody">
+                <tr><td colspan="7" class="muted center">Compare dois arquivos para ver regiões</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-hex">
+          <div class="toolbar">
+            <label class="inline">
+              Offset:
+              <input type="text" id="hexOffset" value="0" class="input-mono" />
+            </label>
+            <button class="btn btn--sm" id="hexPrev">◀ Bloco anterior</button>
+            <button class="btn btn--sm" id="hexNext">Próximo bloco ▶</button>
+            <label class="inline">
+              <input type="checkbox" id="hexOnlyDiff" checked />
+              Destacar só diferenças
+            </label>
+          </div>
+          <div class="hex-grid">
+            <div class="hex-pane">
+              <h3>Arquivo A <span id="hexLabelA"></span></h3>
+              <pre id="hexViewA" class="hex-view"></pre>
+            </div>
+            <div class="hex-pane">
+              <h3>Arquivo B <span id="hexLabelB"></span></h3>
+              <pre id="hexViewB" class="hex-view"></pre>
+            </div>
+          </div>
+          <div class="card" id="wordDiffDetail" hidden>
+            <h3>Detalhe da região selecionada</h3>
+            <pre id="wordDiffPre" class="mono-block"></pre>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-heatmap">
+          <p class="hint">Cada pixel = 4 KB do flash. Vermelho = região com diferenças. Clique para ir ao hex.</p>
+          <canvas id="heatmap" width="512" height="128"></canvas>
+          <div id="heatmapLegend" class="legend"></div>
+        </section>
+
+        <section class="tab-panel" id="tab-strings">
+          <div class="grid-2">
+            <div class="card"><h3>Strings — A</h3><pre id="stringsA" class="mono-block scroll"></pre></div>
+            <div class="card"><h3>Strings — B</h3><pre id="stringsB" class="mono-block scroll"></pre></div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="tab-sections">
+          <p class="hint">Análise heurística de seções: texto ECU, calibração, vazio e alta entropia.</p>
+          <div class="grid-2">
+            <div class="card"><h3>Seções — A</h3><div id="sectionsA"></div></div>
+            <div class="card"><h3>Seções — B</h3><div id="sectionsB"></div></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <span>Processamento 100% local — os arquivos <strong>não saem do seu navegador</strong>. Compatível com GitHub Pages.</span>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
