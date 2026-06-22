@@ -173,9 +173,16 @@
                 <button type="button" class="btn btn--sm" id="hexDiffNext" title="Próxima (N)">▼</button>
               </div>
               <label class="inline toolbar__check">
-                <input type="checkbox" id="hexHideEqual" />
+                <input type="checkbox" id="hexHideEqual" checked />
                 Só linhas com diferença
               </label>
+              <div class="toolbar__group hex-pager">
+                <button type="button" class="btn btn--sm" id="hexPageFirst" title="Primeira página">⏮</button>
+                <button type="button" class="btn btn--sm" id="hexPagePrev" title="Página anterior">◀</button>
+                <span id="hexPageLabel" class="hex-pager__label muted">1 / 1</span>
+                <button type="button" class="btn btn--sm" id="hexPageNext" title="Próxima página">▶</button>
+                <button type="button" class="btn btn--sm" id="hexPageLast" title="Última página">⏭</button>
+              </div>
               <div class="toolbar__group toolbar__group--edit">
                 <label class="inline toolbar__check" title="Clique nos bytes do painel B">
                   <input type="checkbox" id="hexEditB" checked />
@@ -199,8 +206,7 @@
                     <span id="hexLabelA" class="hex-pane__offset muted"></span>
                   </div>
                 </div>
-                <div class="hex-scroll" id="hexScrollA">
-                  <div class="hex-spacer" id="hexSpacerA"></div>
+                <div class="hex-scroll hex-scroll--paged" id="hexScrollA">
                   <div class="hex-content" id="hexContentA"></div>
                 </div>
               </div>
@@ -226,8 +232,7 @@
                     <span id="hexLabelB" class="hex-pane__offset muted"></span>
                   </div>
                 </div>
-                <div class="hex-scroll" id="hexScrollB">
-                  <div class="hex-spacer" id="hexSpacerB"></div>
+                <div class="hex-scroll hex-scroll--paged" id="hexScrollB">
                   <div class="hex-content" id="hexContentB"></div>
                 </div>
               </div>
@@ -265,6 +270,7 @@
                 </tbody>
               </table>
             </div>
+            <div class="pager regions-pager" id="regionsPager" hidden></div>
           </section>
 
           <section class="tab-panel" id="tab-heatmap">

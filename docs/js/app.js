@@ -11,13 +11,14 @@ import {
   formatHexLine,
 } from './decrypt.js';
 import {
-  scanByteDiff,
   analyzeRegion,
+  analyzeRegionLight,
   buildDiffRowsFromRegions,
   buildHeatmapBuckets,
   exportReport,
   getDiffCount,
 } from './diffEngine.js';
+import { scanDiffAsync } from './diffCompare.js';
 import {
   loadAiSettings,
   saveAiSettings,
@@ -92,11 +93,15 @@ const state = {
   comparing: false,
   stringsReadyA: false,
   stringsReadyB: false,
+  hexPage: 0,
+  regionsPage: 0,
 };
 
 const HEX_ROW_HEIGHT = 20;
+const HEX_ROWS_PER_PAGE = 40;
+const REGIONS_PAGE_SIZE = 100;
 const LARGE_FILE = 512 * 1024;
-const REGION_BATCH = 80;
+const REGION_BATCH = 200;
 let hexRenderRaf = 0;
 const $ = (sel) => document.querySelector(sel);
 
@@ -136,6 +141,8 @@ function clearFiles() {
   state.selectedRegion = null;
   state.stringsReadyA = false;
   state.stringsReadyB = false;
+  state.hexPage = 0;
+  state.regionsPage = 0;
   state.comparing = false;
   setCompareLoading(false);
 
@@ -189,7 +196,7 @@ function swapFiles() {
   $('#sectionsB').innerHTML = renderSections(state.metaB.sections);
   $('#dropB').classList.toggle('dropzone--loaded', tmp.drop);
 
-  runCompare();
+  runCompare(true);
   showToast('Arquivos A e B trocados', 'success');
 }
 
@@ -209,8 +216,8 @@ async function assignBuffer(slot, buffer, name) {
   scheduleMetadataEnrichment(slot, buffer, meta);
 
   if (slot === 'A') {
-    state.rawA = cloneBuffer(buffer);
-    state.baseRawA = cloneBuffer(buffer);
+    state.rawA = buffer;
+    state.baseRawA = null;
     state.metaA = meta;
     state.stringsReadyA = buffer.length <= LARGE_FILE;
     setFileInfo($('#infoA'), name, buffer.length);
@@ -222,8 +229,8 @@ async function assignBuffer(slot, buffer, name) {
       : '<p class="muted">Análise de seções em segundo plano…</p>';
     $('#dropA').classList.add('dropzone--loaded');
   } else {
-    state.rawB = cloneBuffer(buffer);
-    state.baseRawB = cloneBuffer(buffer);
+    state.rawB = buffer;
+    state.baseRawB = null;
     state.metaB = meta;
     state.stringsReadyB = buffer.length <= LARGE_FILE;
     setFileInfo($('#infoB'), name, buffer.length);
@@ -314,24 +321,29 @@ async function runCompare(silent = false) {
   await new Promise((r) => requestAnimationFrame(r));
 
   try {
-    const scanned = scanByteDiff(state.decodedA, state.decodedB);
+    const scanned = await scanDiffAsync(state.decodedA, state.decodedB, (pct) => {
+      if (!silent) {
+        setCompareLoading(true, `Comparando… ${Math.round(pct * 100)}%`);
+      }
+    });
     state.diffResult = scanned;
 
     const rawRegions = scanned.regions;
-    state.regions = [];
-    for (let i = 0; i < rawRegions.length; i += REGION_BATCH) {
-      const slice = rawRegions.slice(i, i + REGION_BATCH).map((r) =>
-        analyzeRegion(r, state.decodedA, state.decodedB, state.metaA.sections || [])
-      );
-      state.regions.push(...slice);
-      if (i + REGION_BATCH < rawRegions.length) {
-        if (!silent) {
-          setCompareLoading(true, `Analisando regiões… ${Math.min(i + REGION_BATCH, rawRegions.length)}/${rawRegions.length}`);
-        }
-        await yieldToMain();
-      }
+    state.regions = rawRegions.map((r) =>
+      analyzeRegionLight(r, state.metaA?.sections || [])
+    );
+
+    if (scanned.regionsTruncated) {
+      showToast('Muitas diferenças — regiões agrupadas para performance', 'info', 4500);
     }
 
+    if (state.decodedA.length > LARGE_FILE) {
+      const hideEq = $('#hexHideEqual');
+      if (hideEq) hideEq.checked = true;
+    }
+
+    state.hexPage = 0;
+    state.regionsPage = 0;
     rebuildDiffRows();
     renderSummary();
     renderRegionsTable();
@@ -347,7 +359,7 @@ async function runCompare(silent = false) {
     updateWorkflowSteps(3);
 
     await yieldToMain();
-    scheduleRenderHex();
+    renderHex();
 
     if (!silent) {
       if (total > 0) {
@@ -379,11 +391,10 @@ function renderSummary() {
   `;
 }
 
-function renderRegionsTable() {
-  const filter = $('#regionFilter').value.trim().toLowerCase();
-  const onlyCal = $('#onlyCalibration').checked;
-  const tbody = $('#regionsBody');
-  const rows = state.regions.filter((r) => {
+function getFilteredRegions() {
+  const filter = $('#regionFilter')?.value.trim().toLowerCase() || '';
+  const onlyCal = $('#onlyCalibration')?.checked;
+  return state.regions.filter((r) => {
     if (onlyCal && r.type !== 'calibration') return false;
     if (filter) {
       const hex = r.start.toString(16);
@@ -391,14 +402,54 @@ function renderRegionsTable() {
     }
     return true;
   });
+}
 
-  if (!rows.length) {
+function renderRegionsPager(totalPages, totalRows) {
+  const pager = $('#regionsPager');
+  if (!pager) return;
+  if (totalPages <= 1) {
+    pager.hidden = true;
+    return;
+  }
+  pager.hidden = false;
+  const page = state.regionsPage + 1;
+  pager.innerHTML = `
+    <button type="button" class="btn btn--sm" data-reg-page="first">⏮</button>
+    <button type="button" class="btn btn--sm" data-reg-page="prev">◀</button>
+    <span class="pager__label">Página ${page} / ${totalPages} · ${totalRows} regiões</span>
+    <button type="button" class="btn btn--sm" data-reg-page="next">▶</button>
+    <button type="button" class="btn btn--sm" data-reg-page="last">⏭</button>
+  `;
+  pager.querySelectorAll('[data-reg-page]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const action = btn.dataset.regPage;
+      if (action === 'first') state.regionsPage = 0;
+      else if (action === 'prev') state.regionsPage = Math.max(0, state.regionsPage - 1);
+      else if (action === 'next') state.regionsPage = Math.min(totalPages - 1, state.regionsPage + 1);
+      else if (action === 'last') state.regionsPage = totalPages - 1;
+      renderRegionsTable();
+    });
+  });
+}
+
+function renderRegionsTable() {
+  const tbody = $('#regionsBody');
+  const filtered = getFilteredRegions();
+  state.regionsPage = Math.min(state.regionsPage, Math.max(0, Math.ceil(filtered.length / REGIONS_PAGE_SIZE) - 1));
+
+  if (!filtered.length) {
     tbody.innerHTML = '<tr><td colspan="8" class="muted center">Nenhuma região encontrada</td></tr>';
+    renderRegionsPager(0, 0);
     return;
   }
 
-  tbody.innerHTML = rows
+  const totalPages = Math.ceil(filtered.length / REGIONS_PAGE_SIZE);
+  const start = state.regionsPage * REGIONS_PAGE_SIZE;
+  const pageRows = filtered.slice(start, start + REGIONS_PAGE_SIZE);
+
+  tbody.innerHTML = pageRows
     .map((r, idx) => {
+      const globalIdx = state.regions.indexOf(r);
       const tagClass =
         r.type === 'calibration' ? 'cal' : r.type === 'text' ? 'text' : r.type === 'empty' ? 'empty' : r.type === 'entropy' ? 'entropy' : 'code';
       const maps = state.mappack ? findMapsForRegion(state.mappack, r.start, r.end) : [];
@@ -406,13 +457,16 @@ function renderRegionsTable() {
         ? maps.slice(0, 2).map((m) => `<span class="tag tag--cal" title="${escapeHtml(m.description || '')}">${escapeHtml(m.name)}</span>`).join(' ')
             + (maps.length > 2 ? ` <span class="muted">+${maps.length - 2}</span>` : '')
         : '<span class="muted">—</span>';
-      return `<tr data-region="${state.regions.indexOf(r)}">
-        <td>${idx + 1}</td>
+      const deltaCell = r._light
+        ? '<span class="muted">…</span>'
+        : `${r.avgDelta.toFixed(1)}${r.uniformDelta ? ' ∆' : ''}`;
+      return `<tr data-region="${globalIdx}">
+        <td>${start + idx + 1}</td>
         <td class="mono">0x${r.start.toString(16).toUpperCase()}</td>
         <td class="mono">${r.length} B</td>
         <td><span class="tag tag--${tagClass}">${r.type}</span></td>
         <td>${r.length}</td>
-        <td class="mono">${r.avgDelta.toFixed(1)}${r.uniformDelta ? ' ∆' : ''}</td>
+        <td class="mono">${deltaCell}</td>
         <td class="map-cell">${mapCell}</td>
         <td class="actions">
           <button type="button" class="btn btn--sm jump-region">Hex</button>
@@ -421,6 +475,8 @@ function renderRegionsTable() {
       </tr>`;
     })
     .join('');
+
+  renderRegionsPager(totalPages, filtered.length);
 
   tbody.querySelectorAll('.jump-region').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -440,6 +496,15 @@ function renderRegionsTable() {
   });
 }
 
+function ensureRegionAnalyzed(region) {
+  if (!region?._light) return region;
+  const full = analyzeRegion(region, state.decodedA, state.decodedB, state.metaA?.sections || []);
+  const idx = state.regions.indexOf(region);
+  if (idx >= 0) state.regions[idx] = full;
+  if (state.selectedRegion === region) state.selectedRegion = full;
+  return full;
+}
+
 function jumpToRegion(region) {
   state.selectedRegion = region;
   state.hexOffset = region.start & ~0xf;
@@ -454,7 +519,12 @@ function jumpToRegion(region) {
 function renderRegionDetail(region) {
   const panel = $('#wordDiffDetail');
   const pre = $('#wordDiffPre');
-  if (!region?.wordChanges?.length) {
+  if (!region) {
+    panel.hidden = true;
+    return;
+  }
+  const full = ensureRegionAnalyzed(region);
+  if (!full.wordChanges?.length) {
     panel.hidden = true;
     return;
   }
@@ -632,6 +702,8 @@ function updateEditStatus() {
 function commitByteEdit(side, offset, decodedByte) {
   const raw = side === 'A' ? state.rawA : side === 'B' ? state.rawB : null;
   if (!raw) return false;
+  if (side === 'A' && !state.baseRawA) state.baseRawA = cloneBuffer(state.rawA);
+  if (side === 'B' && !state.baseRawB) state.baseRawB = cloneBuffer(state.rawB);
   if (!applyDecodedByteEdit(raw, offset, decodedByte, getDecodeMode(), getXorKey())) return false;
   updateDecode();
   if (state.rawA && state.rawB) runCompare(true);
@@ -819,11 +891,40 @@ function refreshDiffRowsAligned() {
 }
 
 function scheduleRenderHex() {
-  if (hexRenderRaf) return;
-  hexRenderRaf = requestAnimationFrame(() => {
-    hexRenderRaf = 0;
-    renderHex();
-  });
+  renderHex();
+}
+
+function getHexPageInfo() {
+  const cols = getHexCols();
+  const hideEqual = $('#hexHideEqual')?.checked;
+  const totalRows = hideEqual
+    ? state.diffRows.length
+    : Math.ceil((state.decodedA?.length || 0) / cols);
+  const totalPages = Math.max(1, Math.ceil(Math.max(totalRows, 1) / HEX_ROWS_PER_PAGE));
+  const page = Math.min(Math.max(0, state.hexPage), totalPages - 1);
+  state.hexPage = page;
+  const startRow = page * HEX_ROWS_PER_PAGE;
+  const endRow = Math.min(totalRows, startRow + HEX_ROWS_PER_PAGE);
+  return { page, totalPages, startRow, endRow, totalRows, hideEqual, cols };
+}
+
+function updateHexPagerLabel() {
+  const { page, totalPages, startRow, endRow, hideEqual, cols } = getHexPageInfo();
+  const label = $('#hexPageLabel');
+  if (label) label.textContent = `${page + 1} / ${totalPages}`;
+  const firstOff = hideEqual ? (state.diffRows[startRow] ?? 0) : startRow * cols;
+  const lastIdx = Math.max(startRow, endRow - 1);
+  const lastOff = hideEqual ? (state.diffRows[lastIdx] ?? firstOff) : lastIdx * cols;
+  return { firstOff, lastOff, cols };
+}
+
+function goHexPage(action) {
+  const { totalPages } = getHexPageInfo();
+  if (action === 'first') state.hexPage = 0;
+  else if (action === 'prev') state.hexPage = Math.max(0, state.hexPage - 1);
+  else if (action === 'next') state.hexPage = Math.min(totalPages - 1, state.hexPage + 1);
+  else if (action === 'last') state.hexPage = totalPages - 1;
+  renderHex();
 }
 
 function getHexRowModel() {
@@ -846,49 +947,21 @@ function getHexRowModel() {
   };
 }
 
-function renderHexPane(side, scrollEl, contentEl, spacerEl) {
-  if (!state.decodedA || !state.decodedB || !scrollEl) return;
+function renderHexPane(side, scrollEl, contentEl) {
+  if (!state.decodedA || !state.decodedB || !contentEl) return;
 
-  const cols = getHexCols();
+  const { startRow, endRow, hideEqual, cols } = getHexPageInfo();
   const alignB = getHexAlignB();
   const synced = $('#hexSyncScroll')?.checked;
-  const hideEqual = $('#hexHideEqual')?.checked;
-  const scrollTop = scrollEl.scrollTop;
-  const clientHeight = scrollEl.clientHeight || 400;
-
-  let totalRows;
-  let bufferStart;
-  let bufferEnd;
-
-  if (hideEqual) {
-    totalRows = state.diffRows.length;
-    const startRow = Math.floor(scrollTop / HEX_ROW_HEIGHT);
-    const visibleRows = Math.ceil(clientHeight / HEX_ROW_HEIGHT) + 10;
-    bufferStart = Math.max(0, startRow - 2);
-    bufferEnd = Math.min(totalRows, bufferStart + visibleRows);
-  } else if (side === 'b' && !synced) {
-    totalRows = Math.ceil(state.decodedB.length / cols);
-    const startRow = Math.floor(scrollTop / HEX_ROW_HEIGHT);
-    const visibleRows = Math.ceil(clientHeight / HEX_ROW_HEIGHT) + 10;
-    bufferStart = Math.max(0, startRow - 2);
-    bufferEnd = Math.min(totalRows, bufferStart + visibleRows);
-  } else {
-    totalRows = Math.ceil(state.decodedA.length / cols);
-    const startRow = Math.floor(scrollTop / HEX_ROW_HEIGHT);
-    const visibleRows = Math.ceil(clientHeight / HEX_ROW_HEIGHT) + 10;
-    bufferStart = Math.max(0, startRow - 2);
-    bufferEnd = Math.min(totalRows, bufferStart + visibleRows);
-  }
-
-  spacerEl.style.height = `${totalRows * HEX_ROW_HEIGHT}px`;
-
   const lines = [];
-  for (let row = bufferStart; row < bufferEnd; row++) {
+
+  for (let row = startRow; row < endRow; row++) {
     let offsetA;
     let offsetB;
 
     if (hideEqual) {
       offsetA = state.diffRows[row];
+      if (offsetA == null) continue;
       offsetB = offsetA + alignB;
     } else if (side === 'b' && !synced) {
       offsetB = row * cols;
@@ -914,27 +987,27 @@ function renderHexPane(side, scrollEl, contentEl, spacerEl) {
     }
   }
 
-  contentEl.style.transform = `translateY(${bufferStart * HEX_ROW_HEIGHT}px)`;
+  contentEl.style.transform = '';
   contentEl.innerHTML = lines.join('');
 
   if (side === 'a') {
-    const first = hideEqual ? state.diffRows[bufferStart] ?? 0 : bufferStart * cols;
-    const lastRow = Math.min(bufferEnd, totalRows) - 1;
-    const last = hideEqual ? state.diffRows[lastRow] ?? first : lastRow * cols;
+    const first = hideEqual ? (state.diffRows[startRow] ?? 0) : startRow * cols;
+    const lastIdx = Math.max(startRow, endRow - 1);
+    const last = hideEqual ? (state.diffRows[lastIdx] ?? first) : lastIdx * cols;
     $('#hexLabelA').textContent = `0x${first.toString(16).toUpperCase()} – 0x${(last + cols).toString(16).toUpperCase()}`;
   } else {
     let first;
     let last;
     if (hideEqual) {
-      first = (state.diffRows[bufferStart] ?? 0) + alignB;
-      const lastRow = Math.min(bufferEnd, totalRows) - 1;
-      last = (state.diffRows[lastRow] ?? 0) + alignB;
+      first = (state.diffRows[startRow] ?? 0) + alignB;
+      const lastIdx = Math.max(startRow, endRow - 1);
+      last = (state.diffRows[lastIdx] ?? 0) + alignB;
     } else if (!synced) {
-      first = bufferStart * cols;
-      last = (Math.min(bufferEnd, totalRows) - 1) * cols;
+      first = startRow * cols;
+      last = (endRow - 1) * cols;
     } else {
-      first = bufferStart * cols + alignB;
-      last = (Math.min(bufferEnd, totalRows) - 1) * cols + alignB;
+      first = startRow * cols + alignB;
+      last = (endRow - 1) * cols + alignB;
     }
     $('#hexLabelB').textContent = `0x${Math.max(0, first).toString(16).toUpperCase()} – 0x${(last + cols).toString(16).toUpperCase()}`;
   }
@@ -942,45 +1015,29 @@ function renderHexPane(side, scrollEl, contentEl, spacerEl) {
 
 function renderHex() {
   if (!state.decodedA || !state.decodedB) return;
-  renderHexPane('a', $('#hexScrollA'), $('#hexContentA'), $('#hexSpacerA'));
-  renderHexPane('b', $('#hexScrollB'), $('#hexContentB'), $('#hexSpacerB'));
+  renderHexPane('a', $('#hexScrollA'), $('#hexContentA'));
+  renderHexPane('b', $('#hexScrollB'), $('#hexContentB'));
   updateEditStatus();
-  const scrollA = $('#hexScrollA');
-  const cols = getHexCols();
-  const hideEqual = $('#hexHideEqual')?.checked;
-  const row = Math.floor((scrollA?.scrollTop || 0) / HEX_ROW_HEIGHT);
-  const offsetA = hideEqual ? (state.diffRows[row] ?? 0) : row * cols;
-  updateHexMapLabels(offsetA, offsetA + getHexAlignB());
-}
-
-function onHexScroll(sourceSide) {
-  const scrollA = $('#hexScrollA');
-  const scrollB = $('#hexScrollB');
-  if (!state.hexScrollLock && $('#hexSyncScroll')?.checked) {
-    state.hexScrollLock = true;
-    if (sourceSide === 'a') scrollB.scrollTop = scrollA.scrollTop;
-    else scrollA.scrollTop = scrollB.scrollTop;
-    state.hexScrollLock = false;
+  const { firstOff, lastOff } = updateHexPagerLabel();
+  updateHexMapLabels(firstOff, firstOff + getHexAlignB());
+  state.hexOffset = firstOff;
+  const offsetEl = $('#hexOffset');
+  if (offsetEl && document.activeElement !== offsetEl) {
+    offsetEl.value = '0x' + firstOff.toString(16).toUpperCase();
   }
-  scheduleRenderHex();
 }
 
 function scrollHexToOffset(offset) {
-  const model = getHexRowModel();
   const cols = getHexCols();
+  const hideEqual = $('#hexHideEqual')?.checked;
   let rowIndex;
-  if (model.mode === 'diff-only') {
+  if (hideEqual) {
     rowIndex = state.diffRows.findIndex((off) => off >= offset);
-    if (rowIndex < 0) rowIndex = Math.max(0, model.totalRows - 1);
+    if (rowIndex < 0) rowIndex = Math.max(0, state.diffRows.length - 1);
   } else {
     rowIndex = Math.floor(offset / cols);
   }
-  const scrollTop = Math.max(0, rowIndex * HEX_ROW_HEIGHT - HEX_ROW_HEIGHT * 3);
-  const scrollA = $('#hexScrollA');
-  const scrollB = $('#hexScrollB');
-  scrollA.scrollTop = scrollTop;
-  if ($('#hexSyncScroll')?.checked) scrollB.scrollTop = scrollTop;
-  else scrollB.scrollTop = scrollTop;
+  state.hexPage = Math.floor(rowIndex / HEX_ROWS_PER_PAGE);
   state.hexOffset = offset;
   $('#hexOffset').value = '0x' + offset.toString(16).toUpperCase();
   renderHex();
@@ -988,12 +1045,12 @@ function scrollHexToOffset(offset) {
 
 function jumpToDiff(direction) {
   if (!state.diffRows.length) return;
-  const scrollA = $('#hexScrollA');
-  const cols = getHexCols();
   const hideEqual = $('#hexHideEqual')?.checked;
+  const cols = getHexCols();
+  const { startRow } = getHexPageInfo();
   const currentOffset = hideEqual
-    ? state.diffRows[Math.floor(scrollA.scrollTop / HEX_ROW_HEIGHT)] ?? state.diffRows[0]
-    : Math.floor(scrollA.scrollTop / HEX_ROW_HEIGHT) * cols;
+    ? state.diffRows[startRow] ?? state.diffRows[0]
+    : startRow * cols;
 
   let idx = state.diffRows.findIndex((off) => off >= currentOffset);
   if (idx < 0) idx = state.diffRows.length - 1;
@@ -1149,10 +1206,11 @@ async function runAiAnalysis(regionOnly = false) {
     };
     let regions = state.regions;
     if (regionOnly && state.selectedRegion) {
-      regions = [state.selectedRegion];
+      const region = ensureRegionAnalyzed(state.selectedRegion);
+      regions = [region];
       options.question =
         ($('#aiQuestion').value.trim() || '') +
-        ` Foque na região 0x${state.selectedRegion.start.toString(16).toUpperCase()}–0x${state.selectedRegion.end.toString(16).toUpperCase()}.`;
+        ` Foque na região 0x${region.start.toString(16).toUpperCase()}–0x${region.end.toString(16).toUpperCase()}.`;
     }
 
     const payload = buildAnalysisPayload(
@@ -1252,18 +1310,25 @@ function initEvents() {
   });
   on('#xorKey', 'input', updateDecode);
   on('#hexCols', 'change', () => {
+    state.hexPage = 0;
     rebuildDiffRows();
-    scheduleRenderHex();
+    renderHex();
   });
-  on('#hexHideEqual', 'change', scheduleRenderHex);
-  on('#hexSyncScroll', 'change', scheduleRenderHex);
+  on('#hexHideEqual', 'change', () => {
+    state.hexPage = 0;
+    rebuildDiffRows();
+    renderHex();
+  });
+  on('#hexSyncScroll', 'change', renderHex);
   on('#hexAlignB', 'change', () => {
     rebuildDiffRows();
-    scheduleRenderHex();
+    renderHex();
   });
 
-  on('#hexScrollA', 'scroll', () => onHexScroll('a'));
-  on('#hexScrollB', 'scroll', () => onHexScroll('b'));
+  on('#hexPageFirst', 'click', () => goHexPage('first'));
+  on('#hexPagePrev', 'click', () => goHexPage('prev'));
+  on('#hexPageNext', 'click', () => goHexPage('next'));
+  on('#hexPageLast', 'click', () => goHexPage('last'));
 
   const bindDiffNav = (dir) => () => jumpToDiff(dir);
   on('#hexDiffPrev', 'click', bindDiffNav(-1));
@@ -1276,8 +1341,14 @@ function initEvents() {
     if (el) scrollHexToOffset(parseHexInput(el.value));
   });
 
-  on('#regionFilter', 'input', renderRegionsTable);
-  on('#onlyCalibration', 'change', renderRegionsTable);
+  on('#regionFilter', 'input', () => {
+    state.regionsPage = 0;
+    renderRegionsTable();
+  });
+  on('#onlyCalibration', 'change', () => {
+    state.regionsPage = 0;
+    renderRegionsTable();
+  });
 
   on('#heatmap', 'click', (e) => {
     const canvas = e.target;
@@ -1311,5 +1382,5 @@ initKeyboardShortcuts({
   onTab: activateTab,
 });
 window.addEventListener('resize', () => {
-  if ($('#tab-hex')?.classList.contains('active')) scheduleRenderHex();
+  if ($('#tab-hex')?.classList.contains('active')) renderHex();
 });

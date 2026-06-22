@@ -772,6 +772,29 @@ kbd {
   font-size: 0.68rem;
 }
 
+.hex-scroll--paged {
+  overflow: hidden;
+  max-height: calc(var(--hex-row-h) * 42);
+  min-height: calc(var(--hex-row-h) * 42);
+}
+
+.hex-pager__label,
+.pager__label {
+  font-size: 0.78rem;
+  min-width: 4.5rem;
+  text-align: center;
+}
+
+.pager,
+.regions-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  margin-top: 0.65rem;
+  flex-wrap: wrap;
+}
+
 .hex-scroll {
   position: relative;
   flex: 1;
