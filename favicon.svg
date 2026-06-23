@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="ECU Map Diff">
+  <rect width="32" height="32" rx="6" fill="#141824"/>
+  <rect x="5" y="8" width="9" height="16" rx="2" fill="#3dd6b5" opacity="0.9"/>
+  <rect x="18" y="8" width="9" height="16" rx="2" fill="#5b8def" opacity="0.9"/>
+  <path d="M16 11v10" stroke="#e6b450" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="16" cy="16" r="2" fill="#e6b450"/>
+</svg>

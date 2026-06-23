@@ -589,7 +589,7 @@ function renderRegionDetail(region) {
   const panel = $('#wordDiffDetail');
   const pre = $('#wordDiffPre');
   if (!region || !panel) {
-    panel?.hidden = true;
+    if (panel) panel.hidden = true;
     return;
   }
   panel.hidden = false;
