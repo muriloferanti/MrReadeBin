@@ -1030,14 +1030,27 @@ function toggleHexByteSelection(side, offset) {
       clearHexSelection();
       return;
     }
-    sel.anchor = sel.offsets[sel.offsets.length - 1];
+    if (sel.anchor === offset) {
+      sel.anchor = sel.offsets[0];
+    }
   } else {
     sel.offsets.push(offset);
     sel.offsets.sort((a, b) => a - b);
-    sel.anchor = offset;
   }
   updateHexSelectionHighlight();
   updateHexBulkUI();
+}
+
+function handleShiftHexSelect(side, offset) {
+  closeHexEditor();
+  const sel = state.hexSelection;
+  const anchor = sel?.side === side && sel.anchor != null ? sel.anchor : null;
+  if (anchor == null) {
+    setHexSelection(side, [offset], offset);
+  } else {
+    rangeHexByteSelection(side, anchor, offset);
+  }
+  $('#hexBulkInput')?.focus();
 }
 
 function rangeHexByteSelection(side, anchor, offset) {
@@ -1279,10 +1292,13 @@ function submitHexEditor() {
 }
 
 function onHexPaneClick(e) {
-  if (state.hexDragSelect?.moved) {
-    state.hexDragSelect.moved = false;
+  const drag = state.hexDragSelect;
+  if (drag?.suppressClick) {
+    state.hexDragSelect = null;
     return;
   }
+  state.hexDragSelect = null;
+
   const byte = e.target.closest('.hex-byte[data-editable="1"]');
   if (!byte) {
     if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !isHexSelectMode()) clearHexSelection();
@@ -1293,21 +1309,21 @@ function onHexPaneClick(e) {
   const offset = Number(byte.dataset.offset);
   if (!isSideEditable(side)) return;
 
-  const multi = isHexSelectMode() || e.ctrlKey || e.metaKey;
-
   if (e.shiftKey) {
+    handleShiftHexSelect(side, offset);
+    return;
+  }
+
+  if (e.ctrlKey || e.metaKey) {
     closeHexEditor();
-    const anchor = state.hexSelection?.side === side && state.hexSelection.anchor != null
-      ? state.hexSelection.anchor
-      : offset;
-    rangeHexByteSelection(side, anchor, offset);
+    toggleHexByteSelection(side, offset);
     $('#hexBulkInput')?.focus();
     return;
   }
 
-  if (multi) {
+  if (isHexSelectMode()) {
     closeHexEditor();
-    toggleHexByteSelection(side, offset);
+    setHexSelection(side, [offset], offset);
     $('#hexBulkInput')?.focus();
     return;
   }
@@ -1317,34 +1333,52 @@ function onHexPaneClick(e) {
 }
 
 function onHexPaneMouseDown(e) {
-  if (e.button !== 0 || !isHexSelectMode()) return;
+  if (e.button !== 0 || !isHexSelectMode() || e.shiftKey || e.ctrlKey || e.metaKey) return;
   const byte = e.target.closest('.hex-byte[data-editable="1"]');
   if (!byte) return;
   const side = byte.dataset.side;
   if (!isSideEditable(side)) return;
   const offset = Number(byte.dataset.offset);
-  state.hexDragSelect = { side, start: offset, active: true, moved: false };
-  closeHexEditor();
-  rangeHexByteSelection(side, offset, offset);
-  e.preventDefault();
+  state.hexDragSelect = {
+    side,
+    start: offset,
+    pending: true,
+    active: false,
+    moved: false,
+    suppressClick: false,
+  };
 }
 
 function onHexPaneMouseOver(e) {
   const drag = state.hexDragSelect;
-  if (!drag?.active) return;
+  if (!drag?.pending && !drag?.active) return;
   const byte = e.target.closest(`.hex-byte[data-side="${drag.side}"][data-editable="1"]`);
   if (!byte) return;
   const offset = Number(byte.dataset.offset);
   if (offset === drag.last) return;
   drag.last = offset;
-  drag.moved = true;
+
+  if (drag.pending && !drag.active && offset !== drag.start) {
+    drag.pending = false;
+    drag.active = true;
+    drag.moved = true;
+    closeHexEditor();
+  }
+  if (!drag.active) return;
+
   rangeHexByteSelection(drag.side, drag.start, offset);
 }
 
 function endHexDragSelect(focusBulk = true) {
-  if (!state.hexDragSelect?.active) return;
-  state.hexDragSelect.active = false;
-  if (focusBulk && state.hexSelection?.offsets?.length) $('#hexBulkInput')?.focus();
+  const drag = state.hexDragSelect;
+  if (!drag) return;
+  if (drag.active && drag.moved) {
+    drag.suppressClick = true;
+    drag.pending = false;
+    if (focusBulk && state.hexSelection?.offsets?.length) $('#hexBulkInput')?.focus();
+    return;
+  }
+  state.hexDragSelect = null;
 }
 
 function onHexPaneDblClick(e) {
