@@ -28,6 +28,8 @@ import {
   formatHexEmptyMessage,
   formatHexPagerMeta,
   updateHexPagerControls,
+  syncDiffPagesOnlyUI,
+  buildDiffPageIndices,
   initHexPager,
 } from './hexPager.js';
 import {
@@ -92,6 +94,7 @@ const state = {
   diffResult: null,
   regions: [],
   diffRows: [],
+  diffPages: [],
   selectedRegion: null,
   hexOffset: 0,
   hexScrollLock: false,
@@ -147,6 +150,7 @@ function clearFiles() {
   state.diffResult = null;
   state.regions = [];
   state.diffRows = [];
+  state.diffPages = [];
   state.selectedRegion = null;
   state.stringsReadyA = false;
   state.stringsReadyB = false;
@@ -889,13 +893,16 @@ function rowHasDiffA(rowOffset, cols) {
 function rebuildDiffRows() {
   if (!state.decodedA || !state.regions.length) {
     state.diffRows = [];
+    state.diffPages = [];
     return;
   }
+  const cols = getHexCols();
   if (getHexAlignB() === 0) {
-    state.diffRows = buildDiffRowsFromRegions(state.regions, getHexCols());
-    return;
+    state.diffRows = buildDiffRowsFromRegions(state.regions, cols);
+  } else {
+    refreshDiffRowsAligned();
   }
-  refreshDiffRowsAligned();
+  state.diffPages = buildDiffPageIndices(state.regions, cols, state.decodedA.length);
 }
 
 function refreshDiffRowsAligned() {
@@ -913,9 +920,11 @@ function refreshDiffRowsAligned() {
 }
 
 function getHexViewOptions() {
+  const hideEqual = !!$('#hexHideEqual')?.checked;
   return {
     cols: getHexCols(),
-    hideEqual: !!$('#hexHideEqual')?.checked,
+    hideEqual,
+    diffPagesOnly: !hideEqual && !!$('#hexDiffPagesOnly')?.checked,
   };
 }
 
@@ -936,7 +945,7 @@ function renderHexPane(side, contentEl, view) {
   if (!state.decodedA || !state.decodedB || !contentEl) return;
 
   if (view.isEmpty || view.rowCount === 0) {
-    contentEl.innerHTML = formatHexEmptyMessage(view.hideEqual);
+    contentEl.innerHTML = formatHexEmptyMessage(view.hideEqual, view.diffPagesOnly);
     return;
   }
 
@@ -999,11 +1008,13 @@ function renderHex() {
 
   const view = getHexView();
   const alignB = getHexAlignB();
-  const range = getPageOffsetRange(view, state, alignB);
+  const range = getPageOffsetRange(view);
 
   renderHexPane('a', $('#hexContentA'), view);
   renderHexPane('b', $('#hexContentB'), view);
   updateEditStatus();
+
+  syncDiffPagesOnlyUI(view.hideEqual);
 
   const meta = $('#hexPageMeta');
   if (meta) meta.textContent = formatHexPagerMeta(view, range, alignB);
@@ -1302,6 +1313,11 @@ function initEvents() {
   on('#hexHideEqual', 'change', () => {
     state.hexPage = 0;
     rebuildDiffRows();
+    syncDiffPagesOnlyUI($('#hexHideEqual')?.checked);
+    renderHex();
+  });
+  on('#hexDiffPagesOnly', 'change', () => {
+    state.hexPage = 0;
     renderHex();
   });
   on('#hexSyncScroll', 'change', renderHex);
