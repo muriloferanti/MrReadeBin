@@ -47,6 +47,7 @@ import {
 import {
   applyDecodedByteEdit,
   parseByteHex,
+  parseHexByteSequence,
   countRawDiff,
   isOffsetEdited,
   downloadBuffer,
@@ -108,6 +109,7 @@ const state = {
   baseRawB: null,
   hexEditTarget: null,
   hexSelection: null,
+  hexDragSelect: null,
   mappack: null,
   comparing: false,
   stringsReadyA: false,
@@ -594,6 +596,7 @@ function renderRegionDetail(region) {
   }
   panel.hidden = false;
   updateApplyButtons();
+  updateHexBulkUI();
 
   const full = ensureRegionAnalyzed(region);
   const header = `Região 0x${region.start.toString(16).toUpperCase()}–0x${region.end.toString(16).toUpperCase()} (${region.length} bytes)\n`;
@@ -914,13 +917,74 @@ function commitBulkByteEdit(side, offsets, decodedByte) {
   return count;
 }
 
+function commitBulkByteSequence(side, offsets, values) {
+  const sideU = side.toUpperCase();
+  const raw = sideU === 'A' ? state.rawA : sideU === 'B' ? state.rawB : null;
+  const decoded = sideU === 'A' ? state.decodedA : state.decodedB;
+  if (!raw || !decoded || !offsets?.length || !values?.length) return 0;
+  if (sideU === 'A' && !state.baseRawA) state.baseRawA = cloneBuffer(state.rawA);
+  if (sideU === 'B' && !state.baseRawB) state.baseRawB = cloneBuffer(state.rawB);
+
+  const mode = getDecodeMode();
+  const xorKey = getXorKey();
+  let count = 0;
+  const n = Math.min(offsets.length, values.length);
+  for (let i = 0; i < n; i++) {
+    const offset = offsets[i];
+    const val = values[i];
+    if (offset < 0 || offset >= decoded.length) continue;
+    if (decoded[offset] === val) continue;
+    if (applyDecodedByteEdit(raw, offset, val, mode, xorKey)) count++;
+  }
+  if (count <= 0) return 0;
+
+  updateDecode();
+  if (!(state.rawA && state.rawB)) {
+    renderHex();
+    updateEditStatus();
+  }
+  updateApplyButtons();
+  return count;
+}
+
+function isHexSelectMode() {
+  return !!$('#hexSelectMode')?.checked;
+}
+
+function isSideEditable(side) {
+  return side === 'a' ? !!$('#hexEditA')?.checked : !!$('#hexEditB')?.checked;
+}
+
+function getPrimaryEditSide() {
+  if ($('#hexEditB')?.checked) return 'b';
+  if ($('#hexEditA')?.checked) return 'a';
+  return null;
+}
+
+function syncHexSelectModeUI() {
+  const on = isHexSelectMode();
+  $('#hexScrollA')?.classList.toggle('hex-scroll--selecting', on && isSideEditable('a'));
+  $('#hexScrollB')?.classList.toggle('hex-scroll--selecting', on && isSideEditable('b'));
+}
+
+function setHexSelection(side, offsets, anchor) {
+  const unique = [...new Set(offsets)].sort((a, b) => a - b);
+  if (!unique.length) {
+    clearHexSelection();
+    return;
+  }
+  state.hexSelection = { side, offsets: unique, anchor: anchor ?? unique[0] };
+  updateHexSelectionHighlight();
+  updateHexBulkUI();
+}
+
 function clearHexSelection() {
   state.hexSelection = null;
+  state.hexDragSelect = null;
   document.querySelectorAll('.hex-byte--selected').forEach((el) => el.classList.remove('hex-byte--selected'));
-  const bulk = $('#hexBulkEdit');
-  if (bulk) bulk.hidden = true;
   const bulkInput = $('#hexBulkInput');
   if (bulkInput) bulkInput.value = '';
+  updateHexBulkUI();
 }
 
 function updateHexSelectionHighlight() {
@@ -936,35 +1000,41 @@ function updateHexBulkUI() {
   const sel = state.hexSelection;
   const bulk = $('#hexBulkEdit');
   const countEl = $('#hexBulkCount');
-  if (!bulk || !countEl) return;
-
   const n = sel?.offsets?.length ?? 0;
-  if (n <= 0) {
-    bulk.hidden = true;
-    return;
+
+  if (bulk) bulk.classList.toggle('hex-bulk-edit--active', n > 0);
+  if (countEl) {
+    countEl.textContent = n > 0
+      ? `${n} selecionado${n !== 1 ? 's' : ''} · ${sel.side === 'a' ? 'A' : 'B'}`
+      : '0 selecionados';
+    countEl.classList.toggle('muted', n === 0);
   }
 
-  bulk.hidden = false;
-  const sideLabel = sel.side === 'a' ? 'A' : 'B';
-  countEl.textContent = `${n} byte${n !== 1 ? 's' : ''} · painel ${sideLabel}`;
+  const regionBtn = $('#btnSelectRegionDiffs');
+  if (regionBtn) regionBtn.disabled = !state.selectedRegion || !getPrimaryEditSide();
+
+  const fillBtn = $('#btnFillFromA');
+  if (fillBtn) fillBtn.disabled = !(n > 0 && sel?.side === 'b' && state.decodedA);
 }
 
 function toggleHexByteSelection(side, offset) {
   let sel = state.hexSelection;
   if (!sel || sel.side !== side) {
-    state.hexSelection = { side, offsets: [offset], anchor: offset };
-  } else {
-    const idx = sel.offsets.indexOf(offset);
-    if (idx >= 0) sel.offsets.splice(idx, 1);
-    else {
-      sel.offsets.push(offset);
-      sel.offsets.sort((a, b) => a - b);
-    }
-    sel.anchor = offset;
+    setHexSelection(side, [offset], offset);
+    return;
+  }
+  const idx = sel.offsets.indexOf(offset);
+  if (idx >= 0) {
+    sel.offsets.splice(idx, 1);
     if (!sel.offsets.length) {
       clearHexSelection();
       return;
     }
+    sel.anchor = sel.offsets[sel.offsets.length - 1];
+  } else {
+    sel.offsets.push(offset);
+    sel.offsets.sort((a, b) => a - b);
+    sel.anchor = offset;
   }
   updateHexSelectionHighlight();
   updateHexBulkUI();
@@ -975,29 +1045,135 @@ function rangeHexByteSelection(side, anchor, offset) {
   const hi = Math.max(anchor, offset);
   const offsets = [];
   for (let o = lo; o <= hi; o++) offsets.push(o);
-  state.hexSelection = { side, offsets, anchor };
-  updateHexSelectionHighlight();
-  updateHexBulkUI();
+  setHexSelection(side, offsets, anchor);
+}
+
+function collectDiffOffsetsInRange(side, start, end) {
+  const isDiff = side === 'a' ? isDiffByteA : isDiffByteB;
+  const lo = Math.max(0, Math.min(start, end));
+  const hi = Math.max(start, end);
+  const offsets = [];
+  for (let o = lo; o <= hi; o++) {
+    if (isDiff(o)) offsets.push(o);
+  }
+  return offsets;
+}
+
+function collectDiffOffsetsOnPage(side) {
+  const view = getHexView();
+  if (view.isEmpty || view.rowCount === 0) return [];
+  const alignB = getHexAlignB();
+  const synced = $('#hexSyncScroll')?.checked;
+  const isDiff = side === 'a' ? isDiffByteA : isDiffByteB;
+  const offsets = [];
+  for (let row = view.startRow; row < view.endRow; row++) {
+    const resolved = resolveHexRowOffset(view, row, { alignB, synced, side });
+    if (!resolved) continue;
+    const start = side === 'a' ? resolved.offsetA : resolved.offsetB;
+    const end = start + view.cols - 1;
+    for (let o = start; o <= end; o++) {
+      if (isDiff(o)) offsets.push(o);
+    }
+  }
+  return offsets;
+}
+
+function selectPageDiffBytes() {
+  const side = getPrimaryEditSide();
+  if (!side) {
+    showToast('Ative Editar A ou Editar B', 'info');
+    return;
+  }
+  const offsets = collectDiffOffsetsOnPage(side);
+  if (!offsets.length) {
+    showToast('Nenhum byte diferente nesta página', 'info');
+    return;
+  }
+  closeHexEditor();
+  setHexSelection(side, offsets, offsets[0]);
+  $('#hexBulkInput')?.focus();
+  showToast(`${offsets.length} byte(s) selecionado(s)`, 'info', 2500);
+}
+
+function selectRegionDiffBytes() {
+  const region = state.selectedRegion;
+  const side = getPrimaryEditSide();
+  if (!region || !side) return;
+  const lo = side === 'a' ? region.start : region.start + getHexAlignB();
+  const hi = side === 'a' ? region.end : region.end + getHexAlignB();
+  const offsets = collectDiffOffsetsInRange(side, lo, hi);
+  if (!offsets.length) {
+    showToast('Nenhuma diferença nesta região', 'info');
+    return;
+  }
+  closeHexEditor();
+  setHexSelection(side, offsets, offsets[0]);
+  $('#hexBulkInput')?.focus();
+  showToast(`${offsets.length} byte(s) da região`, 'info', 2500);
+}
+
+function fillSelectedFromA() {
+  const sel = state.hexSelection;
+  if (!sel?.offsets?.length || sel.side !== 'b' || !state.decodedA || !state.rawB) return;
+  ensureEditSnapshot('B');
+  const alignB = getHexAlignB();
+  const mode = getDecodeMode();
+  const xorKey = getXorKey();
+  let count = 0;
+  for (const offsetB of sel.offsets) {
+    const offsetA = offsetB - alignB;
+    if (offsetA < 0 || offsetA >= state.decodedA.length) continue;
+    if (state.decodedA[offsetA] === state.decodedB[offsetB]) continue;
+    if (applyDecodedByteEdit(state.rawB, offsetB, state.decodedA[offsetA], mode, xorKey)) count++;
+  }
+  if (count <= 0) {
+    showToast('Nada a copiar de A', 'info');
+    return;
+  }
+  updateDecode();
+  clearHexSelection();
+  showToast(`${count.toLocaleString('pt-BR')} byte(s) de A aplicados em B`, 'success');
 }
 
 function submitHexBulkEdit() {
   const sel = state.hexSelection;
-  if (!sel?.offsets?.length) return;
-  const val = parseByteHex($('#hexBulkInput')?.value || '');
-  if (val === null) {
-    showToast('Valor hex inválido (00–FF)', 'error');
+  if (!sel?.offsets?.length) {
+    showToast('Selecione bytes no hex (modo seleção ou Ctrl+clique)', 'info');
+    return;
+  }
+  const values = parseHexByteSequence($('#hexBulkInput')?.value || '');
+  if (values === null) {
+    showToast('Valor hex inválido (ex.: FF ou FF 00 AA)', 'error');
+    return;
+  }
+  if (!values.length) {
+    showToast('Informe um valor hex', 'info');
     return;
   }
   const side = sel.side === 'a' ? 'A' : 'B';
-  const n = commitBulkByteEdit(side, sel.offsets, val);
-  if (n <= 0) {
-    showToast('Nenhum byte alterado (já tinham esse valor)', 'info');
-    return;
+  let n;
+  if (values.length === 1) {
+    n = commitBulkByteEdit(side, sel.offsets, values[0]);
+    if (n <= 0) {
+      showToast('Nenhum byte alterado', 'info');
+      return;
+    }
+    showToast(
+      `${n.toLocaleString('pt-BR')} byte(s) → ${values[0].toString(16).toUpperCase().padStart(2, '0')}`,
+      'success'
+    );
+  } else {
+    n = commitBulkByteSequence(side, sel.offsets, values);
+    if (n <= 0) {
+      showToast('Nenhum byte alterado', 'info');
+      return;
+    }
+    const applied = Math.min(values.length, sel.offsets.length);
+    const msg = values.length < sel.offsets.length
+      ? `${n.toLocaleString('pt-BR')} byte(s) · sequência de ${values.length} valor(es)`
+      : `${n.toLocaleString('pt-BR')} byte(s) atualizados`;
+    showToast(msg, 'success');
   }
-  showToast(
-    `${n.toLocaleString('pt-BR')} byte(s) → ${val.toString(16).toUpperCase().padStart(2, '0')}`,
-    'success'
-  );
   clearHexSelection();
 }
 
@@ -1103,33 +1279,72 @@ function submitHexEditor() {
 }
 
 function onHexPaneClick(e) {
+  if (state.hexDragSelect?.moved) {
+    state.hexDragSelect.moved = false;
+    return;
+  }
   const byte = e.target.closest('.hex-byte[data-editable="1"]');
   if (!byte) {
-    if (!e.ctrlKey && !e.metaKey && !e.shiftKey) clearHexSelection();
+    if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !isHexSelectMode()) clearHexSelection();
     return;
   }
   e.preventDefault();
   const side = byte.dataset.side;
   const offset = Number(byte.dataset.offset);
-  if (side === 'a' && !$('#hexEditA')?.checked) return;
-  if (side === 'b' && !$('#hexEditB')?.checked) return;
+  if (!isSideEditable(side)) return;
 
-  if (e.ctrlKey || e.metaKey) {
+  const multi = isHexSelectMode() || e.ctrlKey || e.metaKey;
+
+  if (e.shiftKey) {
+    closeHexEditor();
+    const anchor = state.hexSelection?.side === side && state.hexSelection.anchor != null
+      ? state.hexSelection.anchor
+      : offset;
+    rangeHexByteSelection(side, anchor, offset);
+    $('#hexBulkInput')?.focus();
+    return;
+  }
+
+  if (multi) {
     closeHexEditor();
     toggleHexByteSelection(side, offset);
     $('#hexBulkInput')?.focus();
     return;
   }
 
-  if (e.shiftKey && state.hexSelection?.side === side && state.hexSelection.anchor != null) {
-    closeHexEditor();
-    rangeHexByteSelection(side, state.hexSelection.anchor, offset);
-    $('#hexBulkInput')?.focus();
-    return;
-  }
-
   clearHexSelection();
   openHexEditor(byte, side, offset);
+}
+
+function onHexPaneMouseDown(e) {
+  if (e.button !== 0 || !isHexSelectMode()) return;
+  const byte = e.target.closest('.hex-byte[data-editable="1"]');
+  if (!byte) return;
+  const side = byte.dataset.side;
+  if (!isSideEditable(side)) return;
+  const offset = Number(byte.dataset.offset);
+  state.hexDragSelect = { side, start: offset, active: true, moved: false };
+  closeHexEditor();
+  rangeHexByteSelection(side, offset, offset);
+  e.preventDefault();
+}
+
+function onHexPaneMouseOver(e) {
+  const drag = state.hexDragSelect;
+  if (!drag?.active) return;
+  const byte = e.target.closest(`.hex-byte[data-side="${drag.side}"][data-editable="1"]`);
+  if (!byte) return;
+  const offset = Number(byte.dataset.offset);
+  if (offset === drag.last) return;
+  drag.last = offset;
+  drag.moved = true;
+  rangeHexByteSelection(drag.side, drag.start, offset);
+}
+
+function endHexDragSelect(focusBulk = true) {
+  if (!state.hexDragSelect?.active) return;
+  state.hexDragSelect.active = false;
+  if (focusBulk && state.hexSelection?.offsets?.length) $('#hexBulkInput')?.focus();
 }
 
 function onHexPaneDblClick(e) {
@@ -1147,10 +1362,15 @@ function onHexPaneDblClick(e) {
 }
 
 function initHexEditor() {
-  $('#hexScrollA')?.addEventListener('click', onHexPaneClick);
-  $('#hexScrollB')?.addEventListener('click', onHexPaneClick);
-  $('#hexScrollA')?.addEventListener('dblclick', onHexPaneDblClick);
-  $('#hexScrollB')?.addEventListener('dblclick', onHexPaneDblClick);
+  for (const id of ['hexScrollA', 'hexScrollB']) {
+    const pane = $(`#${id}`);
+    if (!pane) continue;
+    pane.addEventListener('click', onHexPaneClick);
+    pane.addEventListener('dblclick', onHexPaneDblClick);
+    pane.addEventListener('mousedown', onHexPaneMouseDown);
+    pane.addEventListener('mouseover', onHexPaneMouseOver);
+  }
+  document.addEventListener('mouseup', () => endHexDragSelect());
 
   const input = $('#hexEditorInput');
   input?.addEventListener('keydown', (e) => {
@@ -1172,10 +1392,23 @@ function initHexEditor() {
 
   on('#hexBulkApply', 'click', submitHexBulkEdit);
   on('#hexBulkClear', 'click', clearHexSelection);
+  on('#btnSelectPageDiffs', 'click', selectPageDiffBytes);
+  on('#btnSelectRegionDiffs', 'click', selectRegionDiffBytes);
+  on('#btnFillFromA', 'click', fillSelectedFromA);
+  on('#hexSelectMode', 'change', () => {
+    syncHexSelectModeUI();
+    if (!isHexSelectMode()) endHexDragSelect(false);
+  });
   const bulkInput = $('#hexBulkInput');
   bulkInput?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); submitHexBulkEdit(); }
     if (e.key === 'Escape') { e.preventDefault(); clearHexSelection(); }
+  });
+  bulkInput?.addEventListener('paste', (e) => {
+    setTimeout(() => {
+      const text = bulkInput.value.trim();
+      if (/[\s,;]/.test(text)) bulkInput.select();
+    }, 0);
   });
 
   $('#btnRevertEdits')?.addEventListener('click', revertAllEdits);
@@ -1187,12 +1420,16 @@ function initHexEditor() {
   on('#btnApplyRegionBtoA', 'click', () => applyRegionBToA(state.selectedRegion));
   $('#hexEditA')?.addEventListener('change', () => {
     if (!$('#hexEditA')?.checked && state.hexSelection?.side === 'a') clearHexSelection();
+    syncHexSelectModeUI();
     renderHex();
   });
   $('#hexEditB')?.addEventListener('change', () => {
     if (!$('#hexEditB')?.checked && state.hexSelection?.side === 'b') clearHexSelection();
+    syncHexSelectModeUI();
     renderHex();
   });
+  syncHexSelectModeUI();
+  updateHexBulkUI();
 }
 
 function isDiffByteA(offsetA) {
@@ -1357,6 +1594,7 @@ function renderHex() {
   }
   updateHexSelectionHighlight();
   updateHexBulkUI();
+  syncHexSelectModeUI();
 }
 
 function scrollHexToOffset(offset) {

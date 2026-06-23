@@ -19,6 +19,20 @@ export function parseByteHex(input) {
   return Number.isNaN(val) || val < 0 || val > 255 ? null : val;
 }
 
+/** Parseia sequência hex: "FF", "FF 00 AA", "FF,00;AA" */
+export function parseHexByteSequence(input) {
+  const clean = input.trim();
+  if (!clean) return [];
+  const parts = clean.split(/[\s,;]+/).filter(Boolean);
+  const values = [];
+  for (const part of parts) {
+    const val = parseByteHex(part);
+    if (val === null) return null;
+    values.push(val);
+  }
+  return values;
+}
+
 export function countRawDiff(base, current) {
   if (!base || !current) return 0;
   const len = Math.min(base.length, current.length);

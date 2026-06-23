@@ -1024,28 +1024,45 @@ kbd {
 }
 
 .toolbar__group--bulk {
-  padding: 0.2rem 0.45rem;
-  border: 1px solid var(--accent);
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: rgba(91, 141, 239, 0.08);
+  background: var(--surface-2);
+  width: 100%;
+  flex-wrap: wrap;
 }
 
-.hex-bulk-edit[hidden] {
-  display: none !important;
+.hex-bulk-edit--active {
+  border-color: var(--accent);
+  background: rgba(91, 141, 239, 0.08);
 }
 
 .hex-bulk-edit__count {
   font-size: 0.78rem;
   font-family: var(--mono);
   font-weight: 600;
-  color: var(--accent);
   white-space: nowrap;
+  min-width: 6.5rem;
+}
+
+.hex-bulk-edit--active .hex-bulk-edit__count {
+  color: var(--accent);
 }
 
 .hex-bulk-edit__field input {
-  width: 2.5rem;
-  text-align: center;
+  width: 7.5rem;
+  text-align: left;
   text-transform: uppercase;
+  font-size: 0.78rem;
+}
+
+.hex-scroll--selecting {
+  user-select: none;
+  cursor: crosshair;
+}
+
+.hex-scroll--selecting .hex-byte[data-editable="1"] {
+  cursor: crosshair;
 }
 
 .toolbar__group--edit {

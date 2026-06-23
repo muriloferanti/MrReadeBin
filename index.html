@@ -133,7 +133,9 @@
         <ul class="shortcut-list">
           <li><kbd>N</kbd> / <kbd>P</kbd> diferenças</li>
           <li>Clique no hex <strong>B</strong> ou <strong>A</strong> para editar byte</li>
-          <li><kbd>Ctrl</kbd>+clique seleciona vários · <kbd>Shift</kbd>+clique intervalo</li>
+          <li>Ative <strong>Modo seleção</strong> · clique ou arraste no hex</li>
+          <li><strong>Diffs página/região</strong> · sequência <code>FF 00 AA</code> no campo Valor</li>
+          <li><kbd>Ctrl</kbd>+clique também seleciona · <kbd>Shift</kbd>+clique intervalo</li>
           <li>Duplo-clique: <strong>A→B</strong> ou <strong>B→A</strong> (copia byte)</li>
           <li>↩ <strong>A→B</strong> desfaz alteração (página, região ou tudo)</li>
           <li><kbd>[</kbd> / <kbd>]</kbd> páginas hex</li>
@@ -190,14 +192,21 @@
                 <button type="button" class="btn btn--sm btn--ghost" id="btnApplyPageBtoA" disabled title="Copia B para A (página atual)">Página B→A</button>
                 <button type="button" class="btn btn--sm btn--ghost" id="btnApplyAllAtoB" disabled title="Desfazer todas as diferenças em B (usa A)">↩ Tudo A→B</button>
               </div>
-              <div class="toolbar__group toolbar__group--bulk hex-bulk-edit" id="hexBulkEdit" hidden>
-                <span class="hex-bulk-edit__count" id="hexBulkCount">0 bytes</span>
+              <div class="toolbar__group toolbar__group--bulk hex-bulk-edit" id="hexBulkEdit">
+                <label class="inline toolbar__check" title="Clique ou arraste para selecionar vários bytes">
+                  <input type="checkbox" id="hexSelectMode" />
+                  Modo seleção
+                </label>
+                <button type="button" class="btn btn--sm btn--ghost" id="btnSelectPageDiffs" title="Seleciona bytes diferentes visíveis nesta página">Diffs página</button>
+                <button type="button" class="btn btn--sm btn--ghost" id="btnSelectRegionDiffs" disabled title="Seleciona diferenças da região ativa">Diffs região</button>
+                <button type="button" class="btn btn--sm btn--ghost" id="btnFillFromA" disabled title="Preenche bytes B selecionados com valores de A">Usar A→</button>
+                <span class="hex-bulk-edit__count muted" id="hexBulkCount">0 selecionados</span>
                 <label class="inline hex-bulk-edit__field">
                   Valor
-                  <input type="text" id="hexBulkInput" class="input-mono input--sm" maxlength="2" placeholder="FF" autocomplete="off" spellcheck="false" />
+                  <input type="text" id="hexBulkInput" class="input-mono input--sm" placeholder="FF ou FF 00 AA" autocomplete="off" spellcheck="false" title="Um valor repete em todos; vários valores preenchem em ordem" />
                 </label>
-                <button type="button" class="btn btn--sm btn--primary" id="hexBulkApply">Aplicar em todos</button>
-                <button type="button" class="btn btn--sm btn--ghost" id="hexBulkClear">Limpar seleção</button>
+                <button type="button" class="btn btn--sm btn--primary" id="hexBulkApply">Aplicar</button>
+                <button type="button" class="btn btn--sm btn--ghost" id="hexBulkClear">Limpar</button>
               </div>
               <div class="toolbar__group toolbar__group--edit">
                 <label class="inline toolbar__check" title="Clique nos bytes do painel B">
