@@ -1161,6 +1161,115 @@ kbd {
   white-space: nowrap;
 }
 
+.mappack-layout-wrap {
+  margin-bottom: 0.75rem;
+}
+
+.mappack-layout {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.75rem;
+  background: var(--surface);
+  margin-bottom: 0.75rem;
+}
+
+.mappack-layout__hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+}
+
+.mappack-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.65rem;
+  border: 1px solid var(--border);
+}
+
+.mappack-bar__seg {
+  border: none;
+  padding: 0;
+  min-width: 2px;
+  cursor: pointer;
+  opacity: 0.92;
+  transition: opacity 0.12s, transform 0.12s;
+}
+
+.mappack-bar__seg:hover {
+  opacity: 1;
+  transform: scaleY(1.15);
+  z-index: 1;
+}
+
+.mappack-layout-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.mappack-layout-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.mappack-layout-row:last-child {
+  border-bottom: none;
+}
+
+.mappack-layout-row__name {
+  flex: 1;
+  min-width: 8rem;
+}
+
+.hex-byte--map:not(.diff-a):not(.diff-b) {
+  background: color-mix(in srgb, var(--map-color, #5b8def) 22%, transparent) !important;
+  color: #e8ecf4 !important;
+  box-shadow: inset 0 -2px 0 var(--map-color, #5b8def);
+}
+
+.hex-byte--map.hex-byte--map-start {
+  box-shadow: inset 0 0 0 1px var(--map-color, #5b8def), inset 0 -3px 0 var(--map-color, #5b8def);
+}
+
+.hex-byte--map.diff-a,
+.hex-byte--map.diff-b {
+  box-shadow: inset 0 -3px 0 var(--map-color, #5b8def);
+}
+
+.hex-map-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.15rem 0 0.1rem 4.5rem;
+}
+
+.hex-map-chip {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--map-color, #5b8def) 25%, transparent);
+  border-left: 3px solid var(--map-color, #5b8def);
+  color: var(--text);
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hex-line--mapped {
+  margin-top: 0.15rem;
+}
+
 .mono-block {
   font-family: var(--mono);
   font-size: 0.74rem;

@@ -84,9 +84,13 @@ import {
   clearMappackStorage,
   renderMappackInfo,
   renderMapsTable,
+  renderMappackFileLayout,
   findMapsForRegion,
   findMapsAtOffset,
   formatMapShort,
+  getMapBounds,
+  getPrimaryMapAtOffset,
+  getMapCategoryColor,
 } from './mappack.js';
 
 const state = {
@@ -735,6 +739,9 @@ function renderMappackUI() {
       info.classList.add('muted');
     }
     if (wrap) wrap.innerHTML = '<p class="muted center" style="padding:1rem">Carregue um mappack .json</p>';
+    $('#mappackLayoutWrap').innerHTML = '';
+    $('#mappackSectionsOverlay')?.setAttribute('hidden', '');
+    syncHexShowMapsUI();
     $('#btnClearMappack').disabled = true;
     $('#dropMappack')?.classList.remove('dropzone--loaded');
     return;
@@ -756,6 +763,9 @@ function renderMappackUI() {
       });
     });
   }
+  renderMappackLayout();
+  syncHexShowMapsUI();
+  if ($('#tab-hex')?.classList.contains('active')) renderHex();
   $('#btnClearMappack').disabled = false;
   $('#dropMappack')?.classList.add('dropzone--loaded');
 }
@@ -851,15 +861,70 @@ function getHexCols() {
   return Number($('#hexCols').value);
 }
 
+function hexShowMapsEnabled() {
+  return !!state.mappack && !!$('#hexShowMaps')?.checked;
+}
+
+function mapInfoForHexOffset(offset) {
+  const map = getPrimaryMapAtOffset(state.mappack, offset);
+  if (!map) return null;
+  const bounds = getMapBounds(map);
+  return {
+    name: map.name,
+    category: map.category,
+    _bounds: bounds,
+    _color: getMapCategoryColor(map.category),
+  };
+}
+
+function syncHexShowMapsUI() {
+  const wrap = $('#hexShowMapsWrap');
+  const hasResolved = state.mappack?.maps?.some((m) => getMapBounds(m));
+  if (wrap) wrap.hidden = !hasResolved;
+}
+
+function bindMappackJumpButtons(root) {
+  root?.querySelectorAll('.jump-map-layout').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const start = Number(btn.dataset.mapStart);
+      if (start >= 0) {
+        activateTab('hex');
+        scrollHexToOffset(start);
+      }
+    });
+  });
+}
+
+function renderMappackLayout() {
+  const len = state.decodedA?.length || state.decodedB?.length || 0;
+  const html = state.mappack ? renderMappackFileLayout(state.mappack, len) : '';
+  for (const id of ['mappackLayoutWrap', 'mappackSectionsOverlay']) {
+    const el = $(`#${id}`);
+    if (!el) continue;
+    if (!html) {
+      el.innerHTML = '';
+      el.hidden = true;
+      continue;
+    }
+    el.innerHTML = html;
+    el.hidden = false;
+    bindMappackJumpButtons(el);
+  }
+}
+
 function hexOptionsForSide(side) {
   const editable = side === 'a' ? !!$('#hexEditA')?.checked : !!$('#hexEditB')?.checked;
-  return {
+  const opts = {
     editable,
     isEdited: (offset) => {
       if (side === 'a') return isOffsetEdited(state.baseRawA, state.rawA, offset);
       return isOffsetEdited(state.baseRawB, state.rawB, offset);
     },
   };
+  if (hexShowMapsEnabled()) {
+    opts.mapAt = (offset) => mapInfoForHexOffset(offset);
+  }
+  return opts;
 }
 
 function getTotalEditCount() {
@@ -1922,6 +1987,7 @@ function initEvents() {
     state.hexPage = 0;
     renderHex();
   });
+  on('#hexShowMaps', 'change', renderHex);
   on('#hexSyncScroll', 'change', renderHex);
   on('#hexAlignB', 'change', () => {
     rebuildDiffRows();

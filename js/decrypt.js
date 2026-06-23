@@ -34,12 +34,14 @@ export function readU16(buffer, offset, endian = 'be') {
 }
 
 export function formatHexLine(buffer, offset, cols, diffMask = null, side = 'a', wrapRow = false, options = {}) {
-  const { editable = false, isEdited = null } = options;
+  const { editable = false, isEdited = null, mapAt = null } = options;
   const end = Math.min(offset + cols, buffer.length);
   let line = `<span class="offset">${offset.toString(16).toUpperCase().padStart(6, '0')}</span>  `;
   const bytes = [];
   const ascii = [];
   let rowHasDiff = false;
+  let rowHasMap = false;
+  const rowMapStarts = [];
 
   const isDiffAt = (byteOffset) => {
     if (!diffMask) return false;
@@ -52,11 +54,29 @@ export function formatHexLine(buffer, offset, cols, diffMask = null, side = 'a',
     const isDiff = isDiffAt(i);
     if (isDiff) rowHasDiff = true;
     const edited = isEdited?.(i);
+    const map = mapAt?.(i);
     let cls = isDiff ? (side === 'a' ? 'diff-a' : 'diff-b') : 'same';
     if (edited) cls += ' hex-byte--edited';
+    let styleAttr = '';
+    let mapAttr = '';
+    if (map) {
+      rowHasMap = true;
+      cls += ' hex-byte--map';
+      const bounds = map._bounds;
+      const color = map._color || '#5b8def';
+      styleAttr = ` style="--map-color:${color}"`;
+      mapAttr = ` data-map="${escapeHtmlAttr(map.name)}"`;
+      if (bounds && i === bounds.start) {
+        cls += ' hex-byte--map-start';
+        if (!rowMapStarts.some((m) => m.name === map.name)) rowMapStarts.push(map);
+      }
+    }
     const hex = b.toString(16).toUpperCase().padStart(2, '0');
     const editAttr = editable ? ` data-editable="1" data-side="${side}"` : '';
-    bytes.push(`<span class="hex-byte ${cls}" data-offset="${i}"${editAttr} title="${editable ? 'Clique editar · Modo seleção: clique/arraste · Ctrl+clique' : ''}">${hex}</span>`);
+    const tip = map
+      ? `${map.name} (${map.category}) @ 0x${i.toString(16).toUpperCase()}`
+      : editable ? 'Clique editar · Modo seleção: clique/arraste · Ctrl+clique' : '';
+    bytes.push(`<span class="hex-byte ${cls}" data-offset="${i}"${editAttr}${mapAttr}${styleAttr} title="${escapeHtmlAttr(tip)}">${hex}</span>`);
     ascii.push(b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : '.');
   }
 
@@ -67,8 +87,20 @@ export function formatHexLine(buffer, offset, cols, diffMask = null, side = 'a',
 
   line += bytes.join(' ') + '  |' + ascii.join('') + '|';
   if (!wrapRow) return line;
-  const rowCls = rowHasDiff ? 'hex-line hex-line--diff' : 'hex-line';
-  return `<div class="${rowCls}" data-offset="${offset}">${line}</div>`;
+  let rowCls = rowHasDiff ? 'hex-line hex-line--diff' : 'hex-line';
+  if (rowHasMap) rowCls += ' hex-line--mapped';
+  const labels = rowMapStarts.length
+    ? `<div class="hex-map-labels">${rowMapStarts.map((m) => `<span class="hex-map-chip" style="--map-color:${m._color}">${escapeHtmlAttr(m.name)}</span>`).join('')}</div>`
+    : '';
+  return `${labels}<div class="${rowCls}" data-offset="${offset}">${line}</div>`;
+}
+
+function escapeHtmlAttr(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 export function formatWordLine(buffer, offset, count, endian, diffWords = null) {

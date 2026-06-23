@@ -192,6 +192,10 @@
                 <button type="button" class="btn btn--sm btn--ghost" id="btnApplyPageBtoA" disabled title="Copia B para A (página atual)">Página B→A</button>
                 <button type="button" class="btn btn--sm btn--ghost" id="btnApplyAllAtoB" disabled title="Desfazer todas as diferenças em B (usa A)">↩ Tudo A→B</button>
               </div>
+              <label class="inline toolbar__check" id="hexShowMapsWrap" title="Destaca bytes que pertencem a mapas do mappack" hidden>
+                <input type="checkbox" id="hexShowMaps" checked />
+                Mapas no hex
+              </label>
               <div class="toolbar__group toolbar__group--bulk hex-bulk-edit" id="hexBulkEdit">
                 <label class="inline toolbar__check" title="Clique ou arraste para selecionar vários bytes">
                   <input type="checkbox" id="hexSelectMode" />
@@ -361,7 +365,8 @@
           </section>
 
           <section class="tab-panel" id="tab-mappack">
-            <p class="hint">Definições carregadas no painel lateral. Clique em <em>Hex</em> para ir ao offset do mapa.</p>
+            <p class="hint">Definições carregadas no painel lateral. Regiões mapeadas no bin carregado aparecem abaixo e no hex (se ativo).</p>
+            <div id="mappackLayoutWrap" class="mappack-layout-wrap"></div>
             <input type="search" id="mappackFilter" class="input--search" placeholder="Buscar mapa (boost, torque…)" />
             <div class="table-wrap" id="mappackTableWrap">
               <p class="muted center" style="padding:1rem">Carregue um mappack .json</p>
@@ -376,7 +381,8 @@
           </section>
 
           <section class="tab-panel" id="tab-sections">
-            <p class="hint">Seções heurísticas: texto ECU, calibração, vazio e alta entropia.</p>
+            <p class="hint">Seções heurísticas do bin. Com mappack carregado, as regiões mapeadas aparecem abaixo.</p>
+            <div id="mappackSectionsOverlay" class="mappack-layout-wrap" hidden></div>
             <div class="grid-2">
               <div class="card"><h3>Seções — A</h3><div id="sectionsA"></div></div>
               <div class="card"><h3>Seções — B</h3><div id="sectionsB"></div></div>

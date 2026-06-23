@@ -118,6 +118,91 @@ export function getMapBounds(map) {
   return { start, end: end ?? start };
 }
 
+const MAP_CATEGORY_COLORS = [
+  '#3dd6b5', '#5b8def', '#e6b450', '#f07178', '#b388ff', '#4dd0e1',
+  '#81c784', '#ffb74d', '#9575cd', '#4fc3f7', '#aed581', '#ff8a65',
+];
+
+const categoryColorCache = new Map();
+
+export function getMapCategoryColor(category) {
+  const key = (category || 'Geral').toLowerCase();
+  if (categoryColorCache.has(key)) return categoryColorCache.get(key);
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) | 0;
+  const color = MAP_CATEGORY_COLORS[Math.abs(hash) % MAP_CATEGORY_COLORS.length];
+  categoryColorCache.set(key, color);
+  return color;
+}
+
+export function getResolvedMaps(mappack) {
+  if (!mappack?.maps) return [];
+  return mappack.maps
+    .map((m) => {
+      const b = getMapBounds(m);
+      if (!b) return null;
+      return { map: m, start: b.start, end: b.end, size: b.end - b.start + 1 };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.start - b.start);
+}
+
+export function getPrimaryMapAtOffset(mappack, offset) {
+  const maps = findMapsAtOffset(mappack, offset);
+  if (!maps.length) return null;
+  return maps.reduce((best, m) => {
+    const b = getMapBounds(m);
+    const size = b.end - b.start;
+    const bestB = best ? getMapBounds(best) : null;
+    const bestSize = bestB ? bestB.end - bestB.start : Infinity;
+    return size < bestSize ? m : best;
+  }, null);
+}
+
+export function getMapsStartingInRange(mappack, start, end) {
+  return getResolvedMaps(mappack)
+    .filter((r) => r.start >= start && r.start <= end)
+    .map((r) => r.map);
+}
+
+export function renderMappackFileLayout(mappack, fileLength) {
+  const resolved = getResolvedMaps(mappack);
+  if (!resolved.length) {
+    return mappack?._experimental
+      ? '<p class="muted">Import .kp sem offsets — use um mappack <strong>.json</strong> com endereços para ver o layout no arquivo.</p>'
+      : '<p class="muted">Nenhum mapa com offset resolvido neste arquivo.</p>';
+  }
+  const total = Math.max(fileLength || 1, resolved[resolved.length - 1].end + 1);
+  const bar = resolved
+    .map((r) => {
+      const pct = Math.max(0.15, (r.size / total) * 100);
+      const color = getMapCategoryColor(r.map.category);
+      const title = `${r.map.name} (${r.map.category}) · 0x${r.start.toString(16).toUpperCase()}`;
+      return `<button type="button" class="mappack-bar__seg jump-map-layout" style="width:${pct}%;background:${color}" data-map-start="${r.start}" title="${escapeHtml(title)}"></button>`;
+    })
+    .join('');
+
+  const list = resolved
+    .map((r) => {
+      const color = getMapCategoryColor(r.map.category);
+      return `<div class="mappack-layout-row">
+        <span class="swatch" style="background:${color}"></span>
+        <span class="mono">0x${r.start.toString(16).toUpperCase()}–0x${r.end.toString(16).toUpperCase()}</span>
+        <span class="mappack-layout-row__name"><strong>${escapeHtml(r.map.name)}</strong>
+          <span class="tag tag--cal">${escapeHtml(r.map.category)}</span></span>
+        <span class="muted mono">${r.size} B · ${r.map.rows}×${r.map.cols}</span>
+        <button type="button" class="btn btn--sm btn--ghost jump-map-layout" data-map-start="${r.start}">Hex</button>
+      </div>`;
+    })
+    .join('');
+
+  return `<div class="mappack-layout">
+    <p class="hint mappack-layout__hint">${resolved.length} região(ões) mapeada(s) no arquivo (${((resolved.reduce((s, r) => s + r.size, 0) / total) * 100).toFixed(1)}% do bin)</p>
+    <div class="mappack-bar section-bar">${bar}</div>
+    <div class="mappack-layout-list">${list}</div>
+  </div>`;
+}
+
 export function findMapsAtOffset(mappack, offset) {
   if (!mappack?.maps) return [];
   return mappack.maps.filter((m) => {
