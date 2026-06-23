@@ -92,6 +92,13 @@ import {
   getPrimaryMapAtOffset,
   getMapCategoryColor,
 } from './mappack.js';
+import {
+  analyzeNoRead,
+  applyNoReadFindings,
+  findingKey,
+  renderNoReadSummary,
+  renderNoReadTable,
+} from './noread.js';
 
 const state = {
   rawA: null,
@@ -120,6 +127,8 @@ const state = {
   stringsReadyB: false,
   hexPage: 0,
   regionsPage: 0,
+  noReadAnalysis: null,
+  noReadSelected: new Set(),
 };
 
 const HEX_ROW_HEIGHT = 20;
@@ -141,6 +150,7 @@ function activateTab(tabId) {
   else if (tabId === 'strings') ensureStringsRendered();
   else if (tabId === 'sections') ensureSectionsRendered();
   else if (tabId === 'heatmap' && state.diffResult) requestAnimationFrame(renderHeatmap);
+  else if (tabId === 'noread') renderNoReadPanel();
   setSidebarOpen(false);
 }
 
@@ -168,6 +178,8 @@ function clearFiles() {
   state.hexPage = 0;
   state.regionsPage = 0;
   state.comparing = false;
+  state.noReadAnalysis = null;
+  state.noReadSelected = new Set();
   setCompareLoading(false);
 
   ['A', 'B'].forEach((slot) => {
@@ -190,6 +202,8 @@ function clearFiles() {
   updateTabBadges(0, 0);
   updateFileActions();
   updateAiButtons();
+  renderNoReadPanel();
+  updateNoReadButtons();
   showToast('Arquivos removidos', 'info');
 }
 
@@ -267,6 +281,9 @@ async function assignBuffer(slot, buffer, name) {
     $('#dropB').classList.add('dropzone--loaded');
   }
 
+  state.noReadAnalysis = null;
+  state.noReadSelected = new Set();
+
   updateDecode();
   updateFileActions();
   refreshMappackResolution();
@@ -275,7 +292,9 @@ async function assignBuffer(slot, buffer, name) {
     await runCompare();
   } else {
     showToast(`Arquivo ${slot} carregado`, 'success');
+    if (state.rawB) runNoReadScan(true);
   }
+  updateNoReadButtons();
 }
 
 function scheduleMetadataEnrichment(slot, buffer, meta) {
@@ -419,6 +438,8 @@ async function runCompare(silent = false) {
   } finally {
     state.comparing = false;
     setCompareLoading(false);
+    if (state.rawB) runNoReadScan(true);
+    updateNoReadButtons();
   }
 }
 
@@ -938,6 +959,7 @@ function updateEditStatus() {
   const has = n > 0;
   $('#btnRevertEdits').disabled = !has;
   $('#btnDownloadEdited').disabled = !has;
+  updateNoReadButtons();
 }
 
 function commitByteEdit(side, offset, decodedByte) {
@@ -1306,6 +1328,122 @@ function downloadEditedFile() {
   const meta = useA ? state.metaA : state.metaB;
   const name = buildEditedFilename(meta?.fileName || `ecu_${useA ? 'A' : 'B'}.bin`);
   downloadBuffer(raw, name);
+  showToast(`Download: ${name}`, 'success');
+}
+
+function runNoReadScan(silent = false) {
+  if (!state.rawB) {
+    if (!silent) showToast('Carregue o arquivo protegido em B', 'error');
+    return;
+  }
+
+  state.noReadAnalysis = analyzeNoRead({
+    readable: state.rawA,
+    protectedBuf: state.rawB,
+    regions: state.regions,
+    totalDiffCount: state.diffResult ? getDiffCount(state.diffResult) : null,
+  });
+
+  const autoSelect = new Set(
+    state.noReadAnalysis.findings
+      .filter((f) => f.autoApply && f.confidence >= 75)
+      .map(findingKey)
+  );
+  state.noReadSelected = autoSelect.size ? autoSelect : new Set(
+    state.noReadAnalysis.findings.filter((f) => f.autoApply).map(findingKey)
+  );
+
+  renderNoReadPanel();
+  updateNoReadButtons();
+
+  const n = state.noReadAnalysis.findings.length;
+  if (!silent) {
+    showToast(
+      n ? `${n} candidato(s) NoRead encontrado(s)` : 'Nenhum padrão NoRead detectado',
+      n ? 'success' : 'info'
+    );
+  }
+}
+
+function renderNoReadPanel() {
+  const summaryEl = $('#noreadSummary');
+  const resultsEl = $('#noreadResults');
+  if (!summaryEl || !resultsEl) return;
+
+  summaryEl.innerHTML = renderNoReadSummary(state.noReadAnalysis);
+  resultsEl.innerHTML = state.noReadAnalysis
+    ? renderNoReadTable(state.noReadAnalysis.findings, state.noReadSelected)
+    : '';
+
+  resultsEl.querySelectorAll('.noread-check').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const key = cb.dataset.key;
+      if (cb.checked) state.noReadSelected.add(key);
+      else state.noReadSelected.delete(key);
+      updateNoReadButtons();
+    });
+  });
+
+  resultsEl.querySelectorAll('.noread-jump').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const off = Number(btn.dataset.offset);
+      if (off >= 0) {
+        activateTab('hex');
+        scrollHexToOffset(off);
+      }
+    });
+  });
+
+  const badge = $('#tabBadgeNoRead');
+  if (badge) {
+    const n = state.noReadAnalysis?.findings?.length || 0;
+    badge.hidden = n === 0;
+    badge.textContent = String(n);
+  }
+}
+
+function updateNoReadButtons() {
+  const hasB = !!state.rawB;
+  const hasAnalysis = !!state.noReadAnalysis?.findings?.length;
+  const hasSelection = state.noReadSelected.size > 0;
+  const hasHigh = state.noReadAnalysis?.findings?.some((f) => f.autoApply && f.confidence >= 75);
+
+  $('#btnNoReadScan').disabled = !hasB;
+  $('#btnNoReadApplyHigh').disabled = !hasHigh;
+  $('#btnNoReadApplySelected').disabled = !(hasAnalysis && hasSelection);
+  $('#btnNoReadDownload').disabled = !countRawDiff(state.baseRawB, state.rawB);
+}
+
+function applyNoReadPatches(options = {}) {
+  if (!state.rawB || !state.noReadAnalysis?.findings?.length) return;
+
+  if (!state.baseRawB) state.baseRawB = cloneBuffer(state.rawB);
+
+  const onlyKeys = options.highConfidence ? null : state.noReadSelected;
+
+  const result = applyNoReadFindings(state.rawB, state.noReadAnalysis.findings, {
+    minConfidence: options.highConfidence ? 75 : 52,
+    onlyKeys: options.highConfidence ? null : onlyKeys,
+  });
+
+  if (result.totalApplied <= 0) {
+    showToast('Nenhum byte alterado (já aplicado ou seleção vazia)', 'info');
+    return;
+  }
+
+  updateDecode();
+  if (state.rawA && state.rawB) runCompare(true);
+  else renderHex();
+  updateEditStatus();
+  updateNoReadButtons();
+  runNoReadScan();
+  showToast(`${result.totalApplied} byte(s) de proteção removido(s) em B`, 'success');
+}
+
+function downloadNoReadFile() {
+  if (!state.rawB || !countRawDiff(state.baseRawB, state.rawB)) return;
+  const name = buildEditedFilename(state.metaB?.fileName || 'ecu_B.bin', '_noread_off');
+  downloadBuffer(state.rawB, name);
   showToast(`Download: ${name}`, 'success');
 }
 
@@ -1966,6 +2104,11 @@ function initEvents() {
   on('#btnClear', 'click', clearFiles);
   on('#btnExport', 'click', exportJson);
 
+  on('#btnNoReadScan', 'click', () => runNoReadScan(false));
+  on('#btnNoReadApplyHigh', 'click', () => applyNoReadPatches({ highConfidence: true }));
+  on('#btnNoReadApplySelected', 'click', () => applyNoReadPatches({ highConfidence: false }));
+  on('#btnNoReadDownload', 'click', downloadNoReadFile);
+
   on('#decodeMode', 'change', () => {
     const xor = $('#xorField');
     if (xor) xor.hidden = getDecodeMode() !== 'xor';
@@ -2040,6 +2183,7 @@ initMappack();
 initSidebarToggle();
 initCollapsiblePanels();
 updateFileActions();
+updateNoReadButtons();
 if (state.rawA && state.rawB) restoreActiveTab(activateTab);
 initKeyboardShortcuts({
   onNextDiff: () => { if ($('#tab-hex')?.classList.contains('active')) jumpToDiff(1); },

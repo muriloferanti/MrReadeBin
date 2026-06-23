@@ -602,6 +602,12 @@ kbd {
 .center { text-align: center; }
 .hint { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.65rem; line-height: 1.5; }
 
+.noread-panel { display: flex; flex-direction: column; gap: 0.5rem; min-height: 0; }
+.noread-toolbar { gap: 0.5rem; }
+.noread-summary-card { padding: 0.75rem 1rem; }
+.noread-summary-card .stats { margin: 0; }
+.noread-disclaimer { margin-top: 0.25rem; font-size: 0.75rem; }
+
 /* —— Toolbar —— */
 .toolbar {
   display: flex;

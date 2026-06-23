@@ -163,6 +163,7 @@
           <button type="button" class="tab" data-tab="metadata">Metadados</button>
           <button type="button" class="tab" data-tab="ai">Sugestões IA</button>
           <button type="button" class="tab" data-tab="mappack">Mappack</button>
+          <button type="button" class="tab" data-tab="noread">NoRead <span class="tab__badge" id="tabBadgeNoRead" hidden>0</span></button>
           <button type="button" class="tab" data-tab="strings">Strings</button>
           <button type="button" class="tab" data-tab="sections">Seções</button>
         </nav>
@@ -370,6 +371,27 @@
             <input type="search" id="mappackFilter" class="input--search" placeholder="Buscar mapa (boost, torque…)" />
             <div class="table-wrap" id="mappackTableWrap">
               <p class="muted center" style="padding:1rem">Carregue um mappack .json</p>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="tab-noread">
+            <div class="noread-panel">
+              <p class="hint">
+                Remove proteção <strong>NoRead / TPROT</strong> de bins MED17/EDC17.
+                Coloque o arquivo <strong>legível em A</strong> e o <strong>protegido em B</strong> para comparar e localizar o bloco.
+                Só com B, o app busca assinaturas conhecidas (ex.: <code>2B 3C</code> → <code>00 00</code>).
+              </p>
+              <div class="toolbar noread-toolbar">
+                <button type="button" id="btnNoReadScan" class="btn btn--primary" disabled>Analisar NoRead</button>
+                <button type="button" id="btnNoReadApplyHigh" class="btn btn--sm" disabled>Aplicar alta confiança</button>
+                <button type="button" id="btnNoReadApplySelected" class="btn btn--sm" disabled>Aplicar selecionados</button>
+                <button type="button" id="btnNoReadDownload" class="btn btn--sm btn--ghost" disabled>Baixar B limpo</button>
+              </div>
+              <div id="noreadSummary" class="card noread-summary-card"></div>
+              <div id="noreadResults"></div>
+              <p class="hint noread-disclaimer">
+                Heurística experimental — valide o arquivo antes de gravar na ECU. Checksums não são recalculados automaticamente.
+              </p>
             </div>
           </section>
 
