@@ -131,8 +131,10 @@
         <h2>Atalhos</h2>
         <ul class="shortcut-list">
           <li><kbd>N</kbd> / <kbd>P</kbd> diferenças</li>
-          <li>Clique no hex <strong>B</strong> para editar byte</li>
-          <li>Duplo-clique no <strong>A</strong> copia para B</li>
+          <li>Clique no hex <strong>B</strong> ou <strong>A</strong> para editar byte</li>
+          <li><kbd>Ctrl</kbd>+clique seleciona vários · <kbd>Shift</kbd>+clique intervalo</li>
+          <li>Duplo-clique: <strong>A→B</strong> ou <strong>B→A</strong> (copia byte)</li>
+          <li>↩ <strong>A→B</strong> desfaz alteração (página, região ou tudo)</li>
           <li><kbd>[</kbd> / <kbd>]</kbd> páginas hex</li>
         </ul>
       </section>
@@ -181,6 +183,21 @@
                 <input type="checkbox" id="hexDiffPagesOnly" />
                 Só páginas com diferença
               </label>
+              <div class="toolbar__group toolbar__group--apply" id="hexApplyGroup">
+                <span class="toolbar__apply-label muted">Aplicar diff</span>
+                <button type="button" class="btn btn--sm btn--primary" id="btnApplyPageAtoB" disabled title="Restaura B com bytes do original A (página atual)">↩ Página A→B</button>
+                <button type="button" class="btn btn--sm btn--ghost" id="btnApplyPageBtoA" disabled title="Copia B para A (página atual)">Página B→A</button>
+                <button type="button" class="btn btn--sm btn--ghost" id="btnApplyAllAtoB" disabled title="Desfazer todas as diferenças em B (usa A)">↩ Tudo A→B</button>
+              </div>
+              <div class="toolbar__group toolbar__group--bulk hex-bulk-edit" id="hexBulkEdit" hidden>
+                <span class="hex-bulk-edit__count" id="hexBulkCount">0 bytes</span>
+                <label class="inline hex-bulk-edit__field">
+                  Valor
+                  <input type="text" id="hexBulkInput" class="input-mono input--sm" maxlength="2" placeholder="FF" autocomplete="off" spellcheck="false" />
+                </label>
+                <button type="button" class="btn btn--sm btn--primary" id="hexBulkApply">Aplicar em todos</button>
+                <button type="button" class="btn btn--sm btn--ghost" id="hexBulkClear">Limpar seleção</button>
+              </div>
               <div class="toolbar__group toolbar__group--edit">
                 <label class="inline toolbar__check" title="Clique nos bytes do painel B">
                   <input type="checkbox" id="hexEditB" checked />
@@ -252,7 +269,13 @@
             </nav>
 
             <div class="card card--detail" id="wordDiffDetail" hidden>
-              <h3>Detalhe da região</h3>
+              <div class="region-detail__head">
+                <h3>Região selecionada</h3>
+                <div class="region-detail__apply">
+                  <button type="button" class="btn btn--sm btn--primary" id="btnApplyRegionAtoB" disabled title="Desfaz alteração: copia original A para B">↩ A → B</button>
+                  <button type="button" class="btn btn--sm btn--ghost" id="btnApplyRegionBtoA" disabled title="Aplica modificação de B em A">B → A</button>
+                </div>
+              </div>
               <pre id="wordDiffPre" class="mono-block"></pre>
             </div>
           </section>

@@ -59,3 +59,41 @@ export function revertRawBuffer(working, base) {
   if (!working || !base) return;
   working.set(base);
 }
+
+/** Copia bytes diferentes de A para B (desfaz alteração em B). Retorna qty alterada. */
+export function applyDiffRangeAToB(startA, endA, decodedA, decodedB, rawB, alignB, mode, xorKey) {
+  if (!decodedA || !decodedB || !rawB) return 0;
+  let count = 0;
+  const lo = Math.max(0, startA);
+  const hi = Math.min(endA, decodedA.length - 1);
+  for (let o = lo; o <= hi; o++) {
+    const ob = o + alignB;
+    if (ob < 0 || ob >= decodedB.length) continue;
+    if (decodedA[o] === decodedB[ob]) continue;
+    if (applyDecodedByteEdit(rawB, ob, decodedA[o], mode, xorKey)) count++;
+  }
+  return count;
+}
+
+/** Copia bytes diferentes de B para A. */
+export function applyDiffRangeBToA(startA, endA, decodedA, decodedB, rawA, alignB, mode, xorKey) {
+  if (!decodedA || !decodedB || !rawA) return 0;
+  let count = 0;
+  const lo = Math.max(0, startA);
+  const hi = Math.min(endA, decodedA.length - 1);
+  for (let o = lo; o <= hi; o++) {
+    const ob = o + alignB;
+    if (ob < 0 || ob >= decodedB.length) continue;
+    if (decodedA[o] === decodedB[ob]) continue;
+    if (applyDecodedByteEdit(rawA, o, decodedB[ob], mode, xorKey)) count++;
+  }
+  return count;
+}
+
+export function applyDiffRegionAToB(region, decodedA, decodedB, rawB, alignB, mode, xorKey) {
+  return applyDiffRangeAToB(region.start, region.end, decodedA, decodedB, rawB, alignB, mode, xorKey);
+}
+
+export function applyDiffRegionBToA(region, decodedA, decodedB, rawA, alignB, mode, xorKey) {
+  return applyDiffRangeBToA(region.start, region.end, decodedA, decodedB, rawA, alignB, mode, xorKey);
+}

@@ -53,6 +53,10 @@ import {
   buildEditedFilename,
   cloneBuffer,
   revertRawBuffer,
+  applyDiffRangeAToB,
+  applyDiffRangeBToA,
+  applyDiffRegionAToB,
+  applyDiffRegionBToA,
 } from './fileEdit.js';
 import {
   showToast,
@@ -103,6 +107,7 @@ const state = {
   baseRawA: null,
   baseRawB: null,
   hexEditTarget: null,
+  hexSelection: null,
   mappack: null,
   comparing: false,
   stringsReadyA: false,
@@ -329,6 +334,9 @@ async function yieldToMain() {
 async function runCompare(silent = false) {
   if (!state.decodedA || !state.decodedB || state.comparing) return;
 
+  const savedHexOffset = state.hexOffset;
+  const savedRegionsPage = state.regionsPage;
+
   state.comparing = true;
   if (!silent) setCompareLoading(true, 'Comparando arquivos…');
   await new Promise((r) => requestAnimationFrame(r));
@@ -350,13 +358,17 @@ async function runCompare(silent = false) {
       showToast('Muitas diferenças — regiões agrupadas para performance', 'info', 4500);
     }
 
-    if (state.decodedA.length > LARGE_FILE) {
+    // Só sugere o filtro na comparação inicial — não reativa ao editar/recomparar
+    if (!silent && state.decodedA.length > LARGE_FILE) {
       const hideEq = $('#hexHideEqual');
       if (hideEq) hideEq.checked = true;
     }
 
-    state.hexPage = 0;
-    state.regionsPage = 0;
+    if (!silent) {
+      state.hexPage = 0;
+      state.regionsPage = 0;
+    }
+
     rebuildDiffRows();
     renderSummary();
     renderRegionsTable();
@@ -371,8 +383,23 @@ async function runCompare(silent = false) {
     renderSimilarityBar(sim);
     updateWorkflowSteps(3);
 
+    if (silent) {
+      state.regionsPage = Math.min(
+        savedRegionsPage,
+        Math.max(0, Math.ceil(getFilteredRegions().length / REGIONS_PAGE_SIZE) - 1)
+      );
+      const opts = getHexViewOptions();
+      state.hexPage = offsetToHexPage(savedHexOffset, state, opts);
+      const view = computeHexView(state, opts);
+      if (view.totalPages > 0) {
+        state.hexPage = Math.min(state.hexPage, view.totalPages - 1);
+      }
+      state.hexOffset = savedHexOffset;
+    }
+
     await yieldToMain();
     renderHex();
+    updateApplyButtons();
 
     if (!silent) {
       if (total > 0) {
@@ -494,8 +521,10 @@ function renderRegionsTable() {
         <td>${r.length}</td>
         <td class="mono">${deltaCell}</td>
         <td class="map-cell">${mapCell}</td>
-        <td class="actions">
+        <td class="actions actions--wide">
           <button type="button" class="btn btn--sm jump-region">Hex</button>
+          <button type="button" class="btn btn--sm btn--ghost apply-a2b" title="Desfazer: A→B">↩A→B</button>
+          <button type="button" class="btn btn--sm btn--ghost apply-b2a" title="Aplicar B→A">B→A</button>
           <button type="button" class="btn btn--sm btn--ghost jump-ai" ${isAiConfigured(state.aiSettings) ? '' : 'title="Configure a IA primeiro"'}>IA</button>
         </td>
       </tr>`;
@@ -508,6 +537,20 @@ function renderRegionsTable() {
     btn.addEventListener('click', (e) => {
       const row = e.target.closest('tr');
       jumpToRegion(state.regions[Number(row.dataset.region)]);
+    });
+  });
+
+  tbody.querySelectorAll('.apply-a2b').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const row = e.target.closest('tr');
+      applyRegionAToB(state.regions[Number(row.dataset.region)]);
+    });
+  });
+
+  tbody.querySelectorAll('.apply-b2a').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const row = e.target.closest('tr');
+      applyRegionBToA(state.regions[Number(row.dataset.region)]);
     });
   });
 
@@ -545,21 +588,125 @@ function jumpToRegion(region) {
 function renderRegionDetail(region) {
   const panel = $('#wordDiffDetail');
   const pre = $('#wordDiffPre');
-  if (!region) {
-    panel.hidden = true;
-    return;
-  }
-  const full = ensureRegionAnalyzed(region);
-  if (!full.wordChanges?.length) {
-    panel.hidden = true;
+  if (!region || !panel) {
+    panel?.hidden = true;
     return;
   }
   panel.hidden = false;
-  const lines = region.wordChanges.map(
-    (w) =>
-      `0x${w.offset.toString(16).toUpperCase()}: ${w.a} (0x${w.a.toString(16).toUpperCase()}) → ${w.b} (0x${w.b.toString(16).toUpperCase()})  Δ=${w.delta >= 0 ? '+' : ''}${w.delta}`
+  updateApplyButtons();
+
+  const full = ensureRegionAnalyzed(region);
+  const header = `Região 0x${region.start.toString(16).toUpperCase()}–0x${region.end.toString(16).toUpperCase()} (${region.length} bytes)\n`;
+
+  if (full.wordChanges?.length) {
+    const lines = full.wordChanges.map(
+      (w) =>
+        `0x${w.offset.toString(16).toUpperCase()}: ${w.a} (0x${w.a.toString(16).toUpperCase()}) → ${w.b} (0x${w.b.toString(16).toUpperCase()})  Δ=${w.delta >= 0 ? '+' : ''}${w.delta}`
+    );
+    pre.textContent = header + '\n' + lines.join('\n');
+  } else {
+    pre.textContent = `${header}\n↩ A→B restaura o original nesta região.\nB→A aplica a versão modificada em A.`;
+  }
+}
+
+function getPageDiffByteRange(view) {
+  if (view.isEmpty || view.rowCount === 0 || !state.decodedA) return null;
+  const { startRow, endRow, hideEqual, cols } = view;
+  let startA;
+  let endA;
+  if (hideEqual) {
+    startA = state.diffRows[startRow];
+    const lastRow = Math.max(startRow, endRow - 1);
+    endA = (state.diffRows[lastRow] ?? startA) + cols - 1;
+  } else {
+    startA = startRow * cols;
+    endA = endRow * cols - 1;
+  }
+  if (startA == null || startA < 0) return null;
+  endA = Math.min(endA, state.decodedA.length - 1);
+  return { startA, endA };
+}
+
+function ensureEditSnapshot(side) {
+  if (side === 'A' && state.rawA && !state.baseRawA) state.baseRawA = cloneBuffer(state.rawA);
+  if (side === 'B' && state.rawB && !state.baseRawB) state.baseRawB = cloneBuffer(state.rawB);
+}
+
+function finishApply(count, label) {
+  if (count <= 0) {
+    showToast('Nenhum byte diferente neste alcance', 'info');
+    return 0;
+  }
+  updateDecode();
+  updateEditStatus();
+  updateApplyButtons();
+  if (state.selectedRegion) renderRegionDetail(state.selectedRegion);
+  showToast(`${count.toLocaleString('pt-BR')} byte(s): ${label}`, 'success');
+  return count;
+}
+
+function applyPageAToB() {
+  const range = getPageDiffByteRange(getHexView());
+  if (!range) return;
+  ensureEditSnapshot('B');
+  const n = applyDiffRangeAToB(
+    range.startA, range.endA, state.decodedA, state.decodedB, state.rawB,
+    getHexAlignB(), getDecodeMode(), getXorKey()
   );
-  pre.textContent = `Região 0x${region.start.toString(16).toUpperCase()}–0x${region.end.toString(16).toUpperCase()} (${region.length} bytes)\n\n` + lines.join('\n');
+  finishApply(n, 'original A→B (página)');
+}
+
+function applyPageBToA() {
+  const range = getPageDiffByteRange(getHexView());
+  if (!range) return;
+  ensureEditSnapshot('A');
+  const n = applyDiffRangeBToA(
+    range.startA, range.endA, state.decodedA, state.decodedB, state.rawA,
+    getHexAlignB(), getDecodeMode(), getXorKey()
+  );
+  finishApply(n, 'modificado B→A (página)');
+}
+
+function applyRegionAToB(region) {
+  if (!region) return;
+  ensureEditSnapshot('B');
+  const n = applyDiffRegionAToB(
+    region, state.decodedA, state.decodedB, state.rawB,
+    getHexAlignB(), getDecodeMode(), getXorKey()
+  );
+  finishApply(n, `A→B 0x${region.start.toString(16).toUpperCase()}`);
+}
+
+function applyRegionBToA(region) {
+  if (!region) return;
+  ensureEditSnapshot('A');
+  const n = applyDiffRegionBToA(
+    region, state.decodedA, state.decodedB, state.rawA,
+    getHexAlignB(), getDecodeMode(), getXorKey()
+  );
+  finishApply(n, `B→A 0x${region.start.toString(16).toUpperCase()}`);
+}
+
+function applyAllDiffsAToB() {
+  if (!state.regions.length) return;
+  ensureEditSnapshot('B');
+  let total = 0;
+  for (const r of state.regions) {
+    total += applyDiffRegionAToB(
+      r, state.decodedA, state.decodedB, state.rawB,
+      getHexAlignB(), getDecodeMode(), getXorKey()
+    );
+  }
+  finishApply(total, 'original A→B (tudo)');
+}
+
+function updateApplyButtons() {
+  const hasDiff = getDiffCount(state.diffResult) > 0;
+  const can = hasDiff && state.rawA && state.rawB && !state.comparing;
+  ['btnApplyPageAtoB', 'btnApplyPageBtoA', 'btnApplyAllAtoB', 'btnApplyRegionAtoB', 'btnApplyRegionBtoA'].forEach((id) => {
+    const el = $(`#${id}`);
+    if (el) el.disabled = !can;
+  });
 }
 
 function updateHexMapLabels(offsetA, offsetB) {
@@ -732,12 +879,126 @@ function commitByteEdit(side, offset, decodedByte) {
   if (side === 'B' && !state.baseRawB) state.baseRawB = cloneBuffer(state.rawB);
   if (!applyDecodedByteEdit(raw, offset, decodedByte, getDecodeMode(), getXorKey())) return false;
   updateDecode();
-  if (state.rawA && state.rawB) runCompare(true);
-  else {
+  if (!(state.rawA && state.rawB)) {
     renderHex();
     updateEditStatus();
   }
+  updateApplyButtons();
   return true;
+}
+
+function commitBulkByteEdit(side, offsets, decodedByte) {
+  const sideU = side.toUpperCase();
+  const raw = sideU === 'A' ? state.rawA : sideU === 'B' ? state.rawB : null;
+  const decoded = sideU === 'A' ? state.decodedA : state.decodedB;
+  if (!raw || !decoded || !offsets?.length) return 0;
+  if (sideU === 'A' && !state.baseRawA) state.baseRawA = cloneBuffer(state.rawA);
+  if (sideU === 'B' && !state.baseRawB) state.baseRawB = cloneBuffer(state.rawB);
+
+  const mode = getDecodeMode();
+  const xorKey = getXorKey();
+  let count = 0;
+  for (const offset of offsets) {
+    if (offset < 0 || offset >= decoded.length) continue;
+    if (decoded[offset] === decodedByte) continue;
+    if (applyDecodedByteEdit(raw, offset, decodedByte, mode, xorKey)) count++;
+  }
+  if (count <= 0) return 0;
+
+  updateDecode();
+  if (!(state.rawA && state.rawB)) {
+    renderHex();
+    updateEditStatus();
+  }
+  updateApplyButtons();
+  return count;
+}
+
+function clearHexSelection() {
+  state.hexSelection = null;
+  document.querySelectorAll('.hex-byte--selected').forEach((el) => el.classList.remove('hex-byte--selected'));
+  const bulk = $('#hexBulkEdit');
+  if (bulk) bulk.hidden = true;
+  const bulkInput = $('#hexBulkInput');
+  if (bulkInput) bulkInput.value = '';
+}
+
+function updateHexSelectionHighlight() {
+  document.querySelectorAll('.hex-byte--selected').forEach((el) => el.classList.remove('hex-byte--selected'));
+  const sel = state.hexSelection;
+  if (!sel?.offsets?.length) return;
+  for (const off of sel.offsets) {
+    document.querySelector(`.hex-byte[data-side="${sel.side}"][data-offset="${off}"]`)?.classList.add('hex-byte--selected');
+  }
+}
+
+function updateHexBulkUI() {
+  const sel = state.hexSelection;
+  const bulk = $('#hexBulkEdit');
+  const countEl = $('#hexBulkCount');
+  if (!bulk || !countEl) return;
+
+  const n = sel?.offsets?.length ?? 0;
+  if (n <= 0) {
+    bulk.hidden = true;
+    return;
+  }
+
+  bulk.hidden = false;
+  const sideLabel = sel.side === 'a' ? 'A' : 'B';
+  countEl.textContent = `${n} byte${n !== 1 ? 's' : ''} · painel ${sideLabel}`;
+}
+
+function toggleHexByteSelection(side, offset) {
+  let sel = state.hexSelection;
+  if (!sel || sel.side !== side) {
+    state.hexSelection = { side, offsets: [offset], anchor: offset };
+  } else {
+    const idx = sel.offsets.indexOf(offset);
+    if (idx >= 0) sel.offsets.splice(idx, 1);
+    else {
+      sel.offsets.push(offset);
+      sel.offsets.sort((a, b) => a - b);
+    }
+    sel.anchor = offset;
+    if (!sel.offsets.length) {
+      clearHexSelection();
+      return;
+    }
+  }
+  updateHexSelectionHighlight();
+  updateHexBulkUI();
+}
+
+function rangeHexByteSelection(side, anchor, offset) {
+  const lo = Math.min(anchor, offset);
+  const hi = Math.max(anchor, offset);
+  const offsets = [];
+  for (let o = lo; o <= hi; o++) offsets.push(o);
+  state.hexSelection = { side, offsets, anchor };
+  updateHexSelectionHighlight();
+  updateHexBulkUI();
+}
+
+function submitHexBulkEdit() {
+  const sel = state.hexSelection;
+  if (!sel?.offsets?.length) return;
+  const val = parseByteHex($('#hexBulkInput')?.value || '');
+  if (val === null) {
+    showToast('Valor hex inválido (00–FF)', 'error');
+    return;
+  }
+  const side = sel.side === 'a' ? 'A' : 'B';
+  const n = commitBulkByteEdit(side, sel.offsets, val);
+  if (n <= 0) {
+    showToast('Nenhum byte alterado (já tinham esse valor)', 'info');
+    return;
+  }
+  showToast(
+    `${n.toLocaleString('pt-BR')} byte(s) → ${val.toString(16).toUpperCase().padStart(2, '0')}`,
+    'success'
+  );
+  clearHexSelection();
 }
 
 function copyByteAtoB(offsetA) {
@@ -747,9 +1008,24 @@ function copyByteAtoB(offsetA) {
     showToast('Fora do alcance do arquivo B', 'error');
     return;
   }
+  if (state.decodedA[offsetA] === state.decodedB[offsetB]) return;
   const val = state.decodedA[offsetA];
   if (commitByteEdit('B', offsetB, val)) {
-    showToast(`Copiado A→B em 0x${offsetB.toString(16).toUpperCase()}`, 'success');
+    showToast(`A→B em 0x${offsetB.toString(16).toUpperCase()}`, 'success');
+  }
+}
+
+function copyByteBtoA(offsetB) {
+  if (!state.decodedB || !state.rawA) return;
+  const offsetA = offsetB - getHexAlignB();
+  if (offsetA < 0 || offsetA >= state.decodedA.length) {
+    showToast('Fora do alcance do arquivo A', 'error');
+    return;
+  }
+  if (state.decodedA[offsetA] === state.decodedB[offsetB]) return;
+  const val = state.decodedB[offsetB];
+  if (commitByteEdit('A', offsetA, val)) {
+    showToast(`B→A em 0x${offsetA.toString(16).toUpperCase()}`, 'success');
   }
 }
 
@@ -757,10 +1033,12 @@ function revertAllEdits() {
   if (state.rawA && state.baseRawA) revertRawBuffer(state.rawA, state.baseRawA);
   if (state.rawB && state.baseRawB) revertRawBuffer(state.rawB, state.baseRawB);
   closeHexEditor();
+  clearHexSelection();
   updateDecode();
   if (state.rawA && state.rawB) runCompare(true);
   else renderHex();
   updateEditStatus();
+  updateApplyButtons();
   showToast('Edições revertidas', 'info');
 }
 
@@ -826,25 +1104,53 @@ function submitHexEditor() {
 
 function onHexPaneClick(e) {
   const byte = e.target.closest('.hex-byte[data-editable="1"]');
-  if (!byte) return;
+  if (!byte) {
+    if (!e.ctrlKey && !e.metaKey && !e.shiftKey) clearHexSelection();
+    return;
+  }
   e.preventDefault();
   const side = byte.dataset.side;
+  const offset = Number(byte.dataset.offset);
   if (side === 'a' && !$('#hexEditA')?.checked) return;
   if (side === 'b' && !$('#hexEditB')?.checked) return;
-  openHexEditor(byte, side, Number(byte.dataset.offset));
+
+  if (e.ctrlKey || e.metaKey) {
+    closeHexEditor();
+    toggleHexByteSelection(side, offset);
+    $('#hexBulkInput')?.focus();
+    return;
+  }
+
+  if (e.shiftKey && state.hexSelection?.side === side && state.hexSelection.anchor != null) {
+    closeHexEditor();
+    rangeHexByteSelection(side, state.hexSelection.anchor, offset);
+    $('#hexBulkInput')?.focus();
+    return;
+  }
+
+  clearHexSelection();
+  openHexEditor(byte, side, offset);
 }
 
 function onHexPaneDblClick(e) {
-  const byte = e.target.closest('.hex-byte[data-side="a"]');
-  if (!byte || !state.rawB || !$('#hexEditB')?.checked) return;
-  e.preventDefault();
-  copyByteAtoB(Number(byte.dataset.offset));
+  const byteA = e.target.closest('.hex-byte[data-side="a"]');
+  if (byteA && state.rawB && $('#hexEditB')?.checked) {
+    e.preventDefault();
+    copyByteAtoB(Number(byteA.dataset.offset));
+    return;
+  }
+  const byteB = e.target.closest('.hex-byte[data-side="b"]');
+  if (byteB && state.rawA && $('#hexEditA')?.checked) {
+    e.preventDefault();
+    copyByteBtoA(Number(byteB.dataset.offset));
+  }
 }
 
 function initHexEditor() {
   $('#hexScrollA')?.addEventListener('click', onHexPaneClick);
   $('#hexScrollB')?.addEventListener('click', onHexPaneClick);
   $('#hexScrollA')?.addEventListener('dblclick', onHexPaneDblClick);
+  $('#hexScrollB')?.addEventListener('dblclick', onHexPaneDblClick);
 
   const input = $('#hexEditorInput');
   input?.addEventListener('keydown', (e) => {
@@ -858,13 +1164,35 @@ function initHexEditor() {
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && state.hexEditTarget) closeHexEditor();
+    if (e.key === 'Escape') {
+      if (state.hexEditTarget) closeHexEditor();
+      if (state.hexSelection) clearHexSelection();
+    }
+  });
+
+  on('#hexBulkApply', 'click', submitHexBulkEdit);
+  on('#hexBulkClear', 'click', clearHexSelection);
+  const bulkInput = $('#hexBulkInput');
+  bulkInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submitHexBulkEdit(); }
+    if (e.key === 'Escape') { e.preventDefault(); clearHexSelection(); }
   });
 
   $('#btnRevertEdits')?.addEventListener('click', revertAllEdits);
   $('#btnDownloadEdited')?.addEventListener('click', downloadEditedFile);
-  $('#hexEditA')?.addEventListener('change', renderHex);
-  $('#hexEditB')?.addEventListener('change', renderHex);
+  on('#btnApplyPageAtoB', 'click', applyPageAToB);
+  on('#btnApplyPageBtoA', 'click', applyPageBToA);
+  on('#btnApplyAllAtoB', 'click', applyAllDiffsAToB);
+  on('#btnApplyRegionAtoB', 'click', () => applyRegionAToB(state.selectedRegion));
+  on('#btnApplyRegionBtoA', 'click', () => applyRegionBToA(state.selectedRegion));
+  $('#hexEditA')?.addEventListener('change', () => {
+    if (!$('#hexEditA')?.checked && state.hexSelection?.side === 'a') clearHexSelection();
+    renderHex();
+  });
+  $('#hexEditB')?.addEventListener('change', () => {
+    if (!$('#hexEditB')?.checked && state.hexSelection?.side === 'b') clearHexSelection();
+    renderHex();
+  });
 }
 
 function isDiffByteA(offsetA) {
@@ -1027,6 +1355,8 @@ function renderHex() {
   if (offsetEl && document.activeElement !== offsetEl) {
     offsetEl.value = '0x' + firstOff.toString(16).toUpperCase();
   }
+  updateHexSelectionHighlight();
+  updateHexBulkUI();
 }
 
 function scrollHexToOffset(offset) {

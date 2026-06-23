@@ -56,7 +56,7 @@ export function formatHexLine(buffer, offset, cols, diffMask = null, side = 'a',
     if (edited) cls += ' hex-byte--edited';
     const hex = b.toString(16).toUpperCase().padStart(2, '0');
     const editAttr = editable ? ` data-editable="1" data-side="${side}"` : '';
-    bytes.push(`<span class="hex-byte ${cls}" data-offset="${i}"${editAttr} title="${editable ? 'Clique para editar' : ''}">${hex}</span>`);
+    bytes.push(`<span class="hex-byte ${cls}" data-offset="${i}"${editAttr} title="${editable ? 'Clique editar · Ctrl+clique selecionar · Shift intervalo' : ''}">${hex}</span>`);
     ascii.push(b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : '.');
   }
 
